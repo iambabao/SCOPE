@@ -10,4 +10,5 @@
 
 from .generator import Generator
 from .reader import Reader
+from .language_model import LanguageModel
 from .pipline import Pipeline

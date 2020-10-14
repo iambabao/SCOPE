@@ -40,6 +40,7 @@ class Generator:
             cache_dir=cache_dir if cache_dir else None,
         )
         self.model.to(device)
+        self.model.eval()
 
     def __call__(self, input_data, max_length=None):
         batch_text = [entry['context'] for entry in input_data]
