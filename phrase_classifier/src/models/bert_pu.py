@@ -65,7 +65,6 @@ class BertPUClassifier(BertPreTrainedModel):
         logits = self.classifier(phrase_embeddings)  # (batch_size, max_num_phrases, 2)
         outputs = (logits,) + outputs
 
-        # TODO: check loss
         if labels is not None:
             u_risk = self.loss_fct(0, logits, labels == 0)
             p_risk = self.loss_fct(1, logits, labels == 1)

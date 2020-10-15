@@ -5,14 +5,14 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/8/10
+@Last modified date : 2020/10/15
 """
 
 import torch
 import torch.nn as nn
 from transformers import BertModel, BertPreTrainedModel
 
-from .utils import ce_loss, bce_loss
+from .utils import ce_loss, bce_loss, pu_loss
 
 
 class BertExtractor(BertPreTrainedModel):
@@ -20,6 +20,9 @@ class BertExtractor(BertPreTrainedModel):
         super().__init__(config)
 
         self.num_labels = config.num_labels
+        self.loss_type = kwargs.get('loss_type')
+        self.prior = kwargs.get('prior')
+        self.gamma = kwargs.get('gamma')
         self.frozen_layers = kwargs.get('frozen_layers')
 
         self.bert = BertModel(config)
@@ -79,20 +82,29 @@ class BertExtractor(BertPreTrainedModel):
             start_loss = bce_loss(start_logits, start_labels, attention_mask == 1)
             end_loss = bce_loss(end_logits, end_labels, attention_mask == 1)
 
-            # # mask for golden start and end tokens
-            # golden_mask = torch.logical_and(
-            #     start_labels.unsqueeze(-1).expand(-1, -1, max_seq_length),
-            #     end_labels.unsqueeze(-2).expand(-1, max_seq_length, -1)
-            # )
-            #
-            # # mask for predicted start and end tokens
-            # predicted_mask = torch.logical_and(
-            #     (start_logits > 0).unsqueeze(-1).expand(-1, -1, max_seq_length),
-            #     (end_logits > 0).unsqueeze(-2).expand(-1, max_seq_length, -1)
-            # )
-            #
-            # phrase_mask &= (golden_mask | predicted_mask)  # compute loss only for golden and predicted phrases
-            phrase_loss = ce_loss(phrase_logits, phrase_labels, self.num_labels, phrase_mask)
+            if self.loss_type == 'ce-loss':
+                phrase_loss = ce_loss(phrase_logits, phrase_labels, self.num_labels, phrase_mask)
+            elif self.loss_type == 'masked-ce-loss':
+                golden_mask = torch.logical_and(
+                    start_labels.unsqueeze(-1).expand(-1, -1, max_seq_length),
+                    end_labels.unsqueeze(-2).expand(-1, max_seq_length, -1)
+                )  # mask for golden start and end tokens
+                predicted_mask = torch.logical_and(
+                    (start_logits > 0).unsqueeze(-1).expand(-1, -1, max_seq_length),
+                    (end_logits > 0).unsqueeze(-2).expand(-1, max_seq_length, -1)
+                )  # mask for predicted start and end tokens
+                positive_mask = phrase_mask & (golden_mask | predicted_mask)  # maks for all available positive tokens
+                phrase_loss = ce_loss(phrase_logits, phrase_labels, self.num_labels, positive_mask)
+            elif self.loss_type == 'pu-loss':
+                u_risk = pu_loss(phrase_logits, 0, phrase_mask & (phrase_labels == 0))
+                p_risk = pu_loss(phrase_logits, 1, phrase_mask & (phrase_labels == 1))
+                n_risk = u_risk - self.prior * pu_loss(phrase_logits, 0, phrase_mask & (phrase_labels == 1))
+                if n_risk >= 0:
+                    phrase_loss = self.gamma * self.prior * p_risk + n_risk
+                else:
+                    phrase_loss = -n_risk
+            else:
+                raise ValueError('{} is not supported'.format(self.loss_type))
 
             loss = start_loss + end_loss + phrase_loss
             outputs = (loss,) + outputs

@@ -58,7 +58,6 @@ class RobertaPUClassifier(BertPreTrainedModel):
         logits = self.classifier(phrase_embeddings)
         outputs = (logits,) + outputs
 
-        # TODO: check loss
         if labels is not None:
             u_risk = self.loss_fct(0, logits, labels == 0)
             p_risk = self.loss_fct(1, logits, labels == 1)

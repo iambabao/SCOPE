@@ -309,12 +309,7 @@ def main():
         type=str,
         help="Where do you want to store the pre-trained models downloaded from s3",
     )
-    parser.add_argument(
-        "--log_file",
-        default=None,
-        type=str,
-        help="Log file."
-    )
+    parser.add_argument("--log_file", default=None, type=str, help="Log file.")
     parser.add_argument(
         "--max_seq_length",
         default=128,
@@ -323,22 +318,20 @@ def main():
         "longer than this will be truncated, and sequences shorter than this will be padded.",
     )
     parser.add_argument(
-        "--frozen_layers",
-        default=-1,
-        type=int,
-        help="Number of frozen layers in pre-trained language model.",
+        "--loss_type",
+        default="ce-loss",
+        type=str,
+        choices=["ce-loss", "masked-ce-loss", "pu-loss"],
+        help="The loss type.",
     )
     parser.add_argument(
-        "--prior",
-        default=0.10,
-        type=float,
-        help="The estimated prior distribution of positive samples.",
+        "--prior", default=0.10, type=float, help="The estimated prior distribution of positive samples."
     )
     parser.add_argument(
-        "--gamma",
-        default=1.0,
-        type=float,
-        help="The parameter to handle the class imbalance problem.",
+        "--gamma", default=1.0, type=float, help="The parameter to handle the class imbalance problem."
+    )
+    parser.add_argument(
+        "--frozen_layers", default=-1, type=int, help="Number of frozen layers in pre-trained language model."
     )
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
     parser.add_argument("--do_eval", action="store_true", help="Whether to run eval on the dev set.")
@@ -479,6 +472,7 @@ def main():
         from_tf=bool(".ckpt" in args.model_name_or_path),
         config=config,
         cache_dir=args.cache_dir if args.cache_dir else None,
+        loss_type=args.loss_type,
         prior=args.prior,
         gamma=args.gamma,
         frozen_layers=args.frozen_layers,
@@ -534,6 +528,7 @@ def main():
             global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
             model = model_class.from_pretrained(
                 checkpoint,
+                loss_type=args.loss_type,
                 prior=args.prior,
                 gamma=args.gamma,
                 frozen_layers=args.frozen_layers,
