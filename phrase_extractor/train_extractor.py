@@ -121,7 +121,7 @@ def train(args, data_processor, model, tokenizer):
                 inputs["token_type_ids"] = batch[2]
 
             outputs = model(**inputs)
-            loss, phrase_logits, start_logits, end_logots = outputs[0], outputs[1], outputs[2], outputs[3]
+            loss = outputs[0]
 
             description = "Global step: {:>6d}, Loss: {:>.4f}".format(global_step, loss.item())
             epoch_iterator.set_description(description)
@@ -240,8 +240,8 @@ def evaluate(args, data_processor, model, tokenizer, prefix=""):
                 start_predicted = np.append(start_predicted, start_logits.detach().cpu().numpy(), axis=0)
                 end_predicted = np.append(end_predicted, end_logits.detach().cpu().numpy(), axis=0)
                 phrase_predicted = np.append(phrase_predicted, phrase_logits.detach().cpu().numpy(), axis=0)
-    start_predicted = start_predicted > 0
-    end_predicted = end_predicted > 0
+    start_predicted = np.argmax(start_predicted, axis=-1)
+    end_predicted = np.argmax(end_predicted, axis=-1)
     phrase_predicted = np.argmax(phrase_predicted, axis=-1)
     outputs, results = compute_metrics(
         input_ids, phrase_labels, start_labels, end_labels, start_predicted, end_predicted, phrase_predicted, tokenizer
@@ -326,9 +326,6 @@ def main():
     )
     parser.add_argument(
         "--prior", default=0.10, type=float, help="The estimated prior distribution of positive samples."
-    )
-    parser.add_argument(
-        "--gamma", default=1.0, type=float, help="The parameter to handle the class imbalance problem."
     )
     parser.add_argument(
         "--frozen_layers", default=-1, type=int, help="Number of frozen layers in pre-trained language model."
@@ -474,7 +471,6 @@ def main():
         cache_dir=args.cache_dir if args.cache_dir else None,
         loss_type=args.loss_type,
         prior=args.prior,
-        gamma=args.gamma,
         frozen_layers=args.frozen_layers,
     )
     model.to(args.device)
@@ -530,7 +526,6 @@ def main():
                 checkpoint,
                 loss_type=args.loss_type,
                 prior=args.prior,
-                gamma=args.gamma,
                 frozen_layers=args.frozen_layers,
             )
             model.to(args.device)
