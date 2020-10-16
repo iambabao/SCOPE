@@ -318,11 +318,14 @@ def main():
         "longer than this will be truncated, and sequences shorter than this will be padded.",
     )
     parser.add_argument(
-        "--loss_type",
-        default="ce-loss",
+        "--loss_candidates",
+        default="all",
         type=str,
-        choices=["ce-loss", "masked-ce-loss", "pu-loss"],
-        help="The loss type.",
+        choices=["all", "masked"],
+        help="The span candidates used to compute loss.",
+    )
+    parser.add_argument(
+        "--loss_type", default="ce-loss", type=str, choices=["ce-loss", "pu-loss"], help="The loss type.",
     )
     parser.add_argument(
         "--prior", default=0.10, type=float, help="The estimated prior distribution of positive samples."
@@ -469,6 +472,7 @@ def main():
         from_tf=bool(".ckpt" in args.model_name_or_path),
         config=config,
         cache_dir=args.cache_dir if args.cache_dir else None,
+        loss_candidates=args.loss_candidates,
         loss_type=args.loss_type,
         prior=args.prior,
         frozen_layers=args.frozen_layers,
@@ -524,6 +528,7 @@ def main():
             global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
             model = model_class.from_pretrained(
                 checkpoint,
+                loss_candidates=args.loss_candidates,
                 loss_type=args.loss_type,
                 prior=args.prior,
                 frozen_layers=args.frozen_layers,
