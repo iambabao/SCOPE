@@ -16,8 +16,8 @@ class Generator:
 
     Example:
         input_data = [
-            {'context': 'My name is <hl> Sarah <hl> .'},
-            {'context': 'My name is Sarah and I live in <hl> London <hl> .'},
+            {'context': 'My name is <hl> Sarah <hl>.'},
+            {'context': 'My name is Sarah and I live in <hl> London <hl>.'},
             {'context': 'Sarah lived in London. Jone lived in <hl> Canada <hl>.'},
         ]
         generator = Generator(

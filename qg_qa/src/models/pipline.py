@@ -36,13 +36,13 @@ class Pipeline:
     """
 
     def __init__(self, generator_model_name, reader_model_name, lm_model_name, cache_dir=None, device='cpu'):
-        self.generator = Generator(generator_model_name, cache_dir, device)
-        self.reader = Reader(reader_model_name, cache_dir, device)
-        self.lm = LanguageModel(lm_model_name)
+        self.generator = Generator(generator_model_name, cache_dir=cache_dir, device=device)
+        self.reader = Reader(reader_model_name, cache_dir=cache_dir, device=device)
+        self.lm = LanguageModel(lm_model_name, cache_dir=cache_dir, device=device)
 
-    def __call__(self, input_data, lm_key):
-        results = self.generator(input_data)
-        results = self.reader(results)
-        results = self.lm(results, lm_key=lm_key)
+    def __call__(self, input_data, lm_key, max_length=None):
+        results = self.generator(input_data, max_length=max_length)
+        results = self.reader(results, max_length=max_length)
+        results = self.lm(results, lm_key=lm_key, max_length=max_length)
 
         return results
