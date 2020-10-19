@@ -5,20 +5,13 @@
 @Date               : 2020/1/1
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/4/25
+@Last modified date : 2020/10/19
 """
 
 import math
 import json
 import random
 import logging
-import jieba
-import nltk
-import joblib
-import numpy as np
-from jieba import posseg as pseg
-from gensim.models import Word2Vec
-from sklearn.feature_extraction.text import TfidfVectorizer
 
 logger = logging.getLogger(__name__)
 
@@ -147,25 +140,6 @@ def convert_list(item_list, convert_dict, pad, unk, max_len=None):
     return item_list
 
 
-def cut_text(text, language='english'):
-    text = text.strip()
-    return nltk.word_tokenize(text, language=language)
-
-
-def cut_text_zh(text):
-    text = text.strip()
-    return jieba.lcut(text)
-
-
-def pos_text(words, lang='eng'):
-    return nltk.pos_tag(words, lang=lang)
-
-
-def pos_text_zh(text):
-    text = text.strip()
-    return pseg.lcut(text)
-
-
 def make_batch_iter(data, batch_size, shuffle):
     data_size = len(data)
     num_batches = (data_size + batch_size - 1) // batch_size
@@ -176,71 +150,6 @@ def make_batch_iter(data, batch_size, shuffle):
         start_index = i * batch_size
         end_index = min(data_size, (i + 1) * batch_size)
         yield data[start_index:end_index]
-
-
-def train_embedding(text_file, embedding_size, model_file):
-    data = []
-    with open(text_file, 'r', encoding='utf-8') as fin:
-        for line in fin:
-            data.append(line.strip().split())
-
-    model = Word2Vec(data, size=embedding_size, window=5, min_count=5, workers=8)
-    model.save(model_file)
-
-
-def load_embedding(model_file, word_list):
-    model = Word2Vec.load(model_file)
-
-    embedding_matrix = []
-    for word in word_list:
-        if word in model:
-            embedding_matrix.append(model[word])
-        else:
-            embedding_matrix.append(np.zeros(model.vector_size))
-
-    return np.array(embedding_matrix)
-
-
-def load_glove_embedding(data_file, word_list):
-    w2v = {}
-    with open(data_file, 'r', encoding='utf-8') as fin:
-        line = fin.readline()
-        embedding_size = len(line.strip().split()) - 1
-        while line and line != '':
-            line = line.strip().split()
-            if len(line) == embedding_size + 1:
-                word = line[0]
-                vector = [float(val) for val in line[1:]]
-                if word in word_list:
-                    w2v[word] = vector
-            line = fin.readline()
-    logger.info('hit words: {}'.format(len(w2v)))
-
-    embedding_matrix = []
-    for word in word_list:
-        if word in w2v:
-            embedding_matrix.append(w2v[word])
-        else:
-            embedding_matrix.append([0.0] * embedding_size)
-    return np.array(embedding_matrix), embedding_size
-
-
-def train_tfidf(text_file, feature_size, model_file):
-    with open(text_file, 'r', encoding='utf-8') as fin:
-        data = fin.readlines()
-
-    tfidf = TfidfVectorizer(
-        max_features=feature_size,
-        ngram_range=(1, 2),
-        token_pattern=r'(?u)\b\w+\b'
-    ).fit(data)
-    joblib.dump(tfidf, model_file)
-
-    return tfidf
-
-
-def load_tfidf(model_file):
-    return joblib.load(model_file)
 
 
 def cosine_similarity(v1, v2):
@@ -255,20 +164,3 @@ def cosine_similarity(v1, v2):
 
 
 # ====================
-def make_batch_data(batch, pad_id):
-    src = [v.src_ids for v in batch]
-    tag = [v.tag_ids for v in batch]
-    ner = [v.ner_ids for v in batch]
-    pos = [v.pos_ids for v in batch]
-    tgt = [v.tgt_ids for v in batch]
-
-    src_len = np.array([len(v) for v in src])
-    tgt_len = np.array([len(v) for v in tgt])
-
-    src = np.array(pad_batch(src, pad_id, max_len=np.max(src_len)))
-    tag = np.array(pad_batch(tag, pad_id, max_len=np.max(src_len)))
-    ner = np.array(pad_batch(ner, pad_id, max_len=np.max(src_len)))
-    pos = np.array(pad_batch(pos, 0, max_len=np.max(src_len)))
-    tgt = np.array(pad_batch(tgt, pad_id, max_len=np.max(tgt_len)))
-
-    return src, src_len, tag, ner, pos, tgt, tgt_len
