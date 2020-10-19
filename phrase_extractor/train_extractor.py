@@ -189,7 +189,7 @@ def evaluate(args, data_processor, model, tokenizer, prefix=""):
         os.makedirs(args.output_dir)
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
-    dataset = data_processor.load_and_cache_data("dev", tokenizer)
+    dataset = data_processor.load_and_cache_data("eval", tokenizer)
     # Note that DistributedSampler samples randomly
     eval_sampler = SequentialSampler(dataset) if args.local_rank == -1 else DistributedSampler(dataset)
     eval_dataloader = DataLoader(dataset, sampler=eval_sampler, batch_size=args.eval_batch_size)

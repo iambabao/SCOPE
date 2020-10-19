@@ -153,7 +153,7 @@ class DataProcessor:
         else:
             examples = []
             for line in tqdm(
-                list(read_json_lines(os.path.join(self.data_dir, "{}.json".format(role)))),
+                list(read_json_lines(os.path.join(self.data_dir, "data_{}.json".format(role)))),
                 desc="Loading Examples"
             ):
                 sample = {'guid': len(examples)}

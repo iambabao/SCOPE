@@ -5,156 +5,165 @@
 @Date               : 2020/6/16
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/6/16
+@Last modified date : 2020/10/19
 """
 
-import re
 import logging
-import tokenizations
+import stanza
+import random
 from tqdm import tqdm
+from nltk.tokenize import sent_tokenize
 from collections import defaultdict
-from allennlp.predictors.predictor import Predictor
 
-from utils import init_logger, read_file, read_json_lines, save_json_lines
+from utils import init_logger, read_json, save_json, save_json_lines
 
 logger = logging.getLogger(__name__)
 
 
-def extract_phrases(root):
-    def _locate_sequence(sequence_a, sequence_b, shift):
-        for i in range(shift, len(sequence_a)):
-            if sequence_a[i:i + len(sequence_b)] == sequence_b:
-                return i, i + len(sequence_b)
-
-    def _dfs(parent, parent_shift):
-        phrase_spans = set()
-        child_shift = 0
-        for child in parent['children']:
-            tokens = child['word'].split()
-            node_start, node_end = _locate_sequence(parent['word'].split(), tokens, child_shift)
-            if 'children' in child:
-                phrase_spans.add((node_start + parent_shift, node_end + parent_shift, 0))
-                phrase_spans.update(_dfs(child, parent_shift + child_shift))
-            child_shift += len(tokens)
-        return phrase_spans
-
-    return _dfs(root, 0)
+def locate_answer_with_nltk(context, sentences, answer, raw_start):
+    for sentence in sentences:
+        sentence_start = context.index(sentence)
+        if sentence_start <= raw_start < raw_start + len(answer) <= sentence_start + len(sentence):
+            new_start = raw_start - sentence_start
+            if sentence[new_start:new_start + len(answer)] == answer:
+                return sentence, new_start, new_start + len(answer)
+    return '', 0, 0
 
 
-def locate_answer(token_spans, answer_start, answer_end):
-    start, end = 0, len(token_spans)
-    while start < end - 1 and token_spans[start + 1][0] <= answer_start:
-        start += 1
-    while start < end - 1 and token_spans[end - 1][0] >= answer_end:
-        end -= 1
+def convert_data_with_nltk(filein, fileout):
+    data = read_json(filein)['data']
 
-    return start, end
-
-
-def convert_data(filein, fileout):
-    data = defaultdict(list)
-    for line in tqdm(list(read_file(filein)), desc='Converting data: {}'.format(filein)):
-        _, _, _, _, _, _, context, answer_start, answer, question = line.strip().split('\t')
-        answer = re.sub(r'[,.?]+$', '', answer)
-        # answer = re.sub(r'[`~!@#$%^&*()\-_=+\[{\]}\\|;:\'",<.>/?]+$', '', answer)
-        answer_start = int(answer_start)
-        answer_end = answer_start + len(answer)
-        if context[answer_start:answer_end] != answer: continue
-        data[context].append({
-            'question': question,
-            'answer_start': answer_start,
-            'answer_end': answer_end,
-        })
-    data = [{'context': key, 'qas': value} for key, value in data.items()]
-    save_json_lines(data, fileout)
-
-
-def tokenize_data(filein, fileout, cuda_device=-1):
-    predictor = Predictor.from_path(
-        'https://storage.googleapis.com/allennlp-public-models/elmo-constituency-parser-2020.02.10.tar.gz',
-        cuda_device=cuda_device,
-    )
-
-    data = []
-    for line in tqdm(list(read_json_lines(filein)), desc='Tokenizing data'):
-        context = line['context']
-        encoded_context = predictor.predict(context)
-        tokenized_context = encoded_context['tokens']
-        token_spans = tokenizations.get_original_spans(tokenized_context, context)
-        phrase_spans = extract_phrases(encoded_context['hierplane_tree']['root'])
-        phrase_spans = sorted(phrase_spans, key=lambda x: (x[1] - x[0], x[0]))
-
-        qas = []
-        for qa in line['qas']:
-            question = qa['question']
-            answer_start = qa['answer_start']
-            answer_end = qa['answer_end']
-            encoded_question = predictor.predict(question)
-            tokenized_question = encoded_question['tokens']
-
-            flag = True
-            answer_span = locate_answer(token_spans, answer_start, answer_end)
-            for i in range(len(phrase_spans)):
-                start, end, label = phrase_spans[i]
-                if start <= answer_span[0] < answer_span[1] <= end:
-                    if (start, end) == answer_span:
-                        # logger.info('Exact match with {}'.format(tokenized_context[start:end]))
-                        phrase_spans[i] = (start, end, 1)
-                    else:
-                        # logger.info('Fuzzy match with {}'.format(tokenized_context[start:end]))
-                        phrase_spans[i] = (start, end, 2)
-                    qa = {'question': tokenized_question, 'answer_start': start, 'answer_end': end}
-                    if qa not in qas:
-                        qas.append(qa)
-                    flag = False
-                    break
-            if flag:
-                logger.info('=' * 20)
-                logger.info(context)
-                logger.info(context[answer_start:answer_end])
-                logger.info(tokenized_context[answer_span[0]:answer_span[1]])
-
-        if len(qas) > 0:
-            data.append({
-                'context': tokenized_context,
-                'phrases': phrase_spans,
-                'qas': qas
-            })
-
-    save_json_lines(data, fileout)
-
-
-def count(filename):
     mismatch = 0
-    exact_match = 0
-    fuzzy_match = 0
-    file_iter = tqdm(list(read_json_lines(filename)), desc='Counting')
-    for line in file_iter:
-        for phrase in line['phrases']:
-            if phrase[-1] == 0: mismatch += 1
-            elif phrase[-1] == 1: exact_match += 1
-            elif phrase[-1] == 2: fuzzy_match += 1
-            else: raise ValueError(phrase)
-    logger.info('Mismatch: {}'.format(mismatch))
-    logger.info('Exact match: {}'.format(exact_match))
-    logger.info('Fuzzy match: {}'.format(fuzzy_match))
-    logger.info('Positive rate: {}'.format((exact_match + fuzzy_match) / (mismatch + exact_match + fuzzy_match)))
+    new_data = []
+    for page in tqdm(data, desc='Converting data: {}'.format(filein)):
+        for paragraph in page['paragraphs']:
+            context = paragraph['context']
+            sentences = sent_tokenize(context)
+            for qa in paragraph['qas']:
+                if qa['is_impossible']:
+                    continue
+                _id = qa['id']
+                question = qa['question']
+                answers = []
+                for answer in qa['answers']:
+                    if answer in answers:
+                        continue
+                    answers.append(answer)
+                    sentence, answer_start, answer_end = locate_answer_with_nltk(
+                        context, sentences, answer['text'], answer['answer_start']
+                    )
+                    if len(sentence) == 0 or answer_start >= answer_end:
+                        mismatch += 1
+                        logger.warning(_id)
+                        continue
+                    new_data.append({
+                        'context': sentence,
+                        'question': question,
+                        'answer': answer['text'],
+                        'answer_start': answer_start,
+                        'answer_end': answer_end,
+                    })
+    logger.info('match: {}'.format(len(new_data)))
+    logger.info('mismatch: {}'.format(mismatch))
+    save_json(new_data, fileout)
+    return new_data
+
+
+def locate_answer_with_stanza(doc, answer, raw_start):
+    for sentence in doc.sentences:
+        first_token = sentence.tokens[0]
+        last_token = sentence.tokens[-1]
+        if first_token.start_char <= raw_start < raw_start + len(answer) <= last_token.end_char:
+            new_start = raw_start - first_token.start_char
+            if sentence.text[new_start:new_start + len(answer)] == answer:
+                return sentence.text, new_start, new_start + len(answer)
+    return '', 0, 0
+
+
+def convert_data_with_stanza(filein, fileout):
+    nlp = stanza.Pipeline('en')
+    data = read_json(filein)['data']
+
+    mismatch = 0
+    new_data = []
+    for page in tqdm(data, desc='Converting data: {}'.format(filein)):
+        for paragraph in page['paragraphs']:
+            context = paragraph['context']
+            doc = nlp(context)
+            for qa in paragraph['qas']:
+                if qa['is_impossible']:
+                    continue
+                _id = qa['id']
+                question = qa['question']
+                answers = []
+                for answer in qa['answers']:
+                    if answer in answers:
+                        continue
+                    answers.append(answer)
+                    sentence, answer_start, answer_end = locate_answer_with_stanza(
+                        doc, answer['text'], answer['answer_start']
+                    )
+                    if len(sentence) == 0 or answer_start >= answer_end:
+                        mismatch += 1
+                        logger.warning(_id)
+                        continue
+                    new_data.append({
+                        'context': sentence,
+                        'question': question,
+                        'answer': answer['text'],
+                        'answer_start': answer_start,
+                        'answer_end': answer_end,
+                    })
+    logger.info('match: {}'.format(len(new_data)))
+    logger.info('mismatch: {}'.format(mismatch))
+    save_json(new_data, fileout)
+    return new_data
+
+
+def refine_data(data):
+    context2qas = defaultdict(list)
+
+    for line in data:
+        context2qas[line['context']].append({
+            'question': line['question'],
+            'answer': line['answer'],
+            'answer_start': line['answer_start'],
+            'answer_end': line['answer_end'],
+        })
+
+    data = [{'context': key, 'qas': value} for key, value in context2qas.items()]
+    return data
 
 
 def main():
     init_logger(logging.INFO)
 
-    # convert_data('data/redistribute/raw/train.txt', 'data/phrase/train.json')
-    # convert_data('data/redistribute/raw/dev.txt.shuffle.dev', 'data/phrase/dev.json')
-    # convert_data('data/redistribute/raw/dev.txt.shuffle.test', 'data/phrase/test.json')
+    """
+    2020-10-16 15:43:53 - INFO - __main__:  match: 86607
+    2020-10-16 15:43:53 - INFO - __main__:  mismatch: 214
+    2020-10-16 15:43:54 - INFO - __main__:  match: 10368
+    2020-10-16 15:43:54 - INFO - __main__:  mismatch: 20
+    """
+    train_data = convert_data_with_nltk('data/SQuAD/train-v2.0.json', 'data/phrase/raw_nltk_train.json')
+    dev_data = convert_data_with_nltk('data/SQuAD/dev-v2.0.json', 'data/phrase/raw_nltk_dev.json')
 
-    # tokenize_data('data/phrase/train.json', 'data/phrase/train.tokenized.json', cuda_device=0)
-    # tokenize_data('data/phrase/dev.json', 'data/phrase/dev.tokenized.json', cuda_device=0)
-    # tokenize_data('data/phrase/test.json', 'data/phrase/test.tokenized.json', cuda_device=0)
+    """
+    2020-10-16 15:12:52 - INFO - __main__:  match: 86460
+    2020-10-16 15:12:52 - INFO - __main__:  mismatch: 361
+    2020-10-16 15:15:21 - INFO - __main__:  match: 10360
+    2020-10-16 15:15:21 - INFO - __main__:  mismatch: 28
+    """
+    # train_data = convert_data_with_stanza('data/SQuAD/train-v2.0.json', 'data/phrase/raw_stanza_train.json')
+    # dev_data = convert_data_with_stanza('data/SQuAD/dev-v2.0.json', 'data/phrase/raw_stanza_dev.json')
 
-    count('data/phrase/train.tokenized.json')
-    count('data/phrase/dev.tokenized.json')
-    count('data/phrase/test.tokenized.json')
+    # split into train, eval and test set
+    train_data = refine_data(train_data)
+    dev_data = refine_data(dev_data)
+    random.shuffle(dev_data)
+    eval_data, test_data = dev_data[:len(dev_data) // 2], dev_data[len(dev_data) // 2:]
+    save_json_lines(train_data, 'data/phrase/data_train.json')
+    save_json_lines(eval_data, 'data/phrase/data_eval.json')
+    save_json_lines(test_data, 'data/phrase/data_test.json')
 
 
 if __name__ == '__main__':
