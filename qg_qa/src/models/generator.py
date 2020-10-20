@@ -5,9 +5,10 @@
 @Date               : 2020/10/13
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/10/13
+@Last modified date : 2020/10/20
 """
 
+from torch.nn import CrossEntropyLoss
 from transformers import AutoTokenizer, AutoModelWithLMHead
 
 
@@ -41,6 +42,7 @@ class Generator:
         )
         self.model.to(device)
         self.model.eval()
+        self.loss_fct = CrossEntropyLoss(ignore_index=-100, reduction='none')
 
     def __call__(self, input_data, max_length=None):
         batch_text = [entry['context'] for entry in input_data]
@@ -54,9 +56,13 @@ class Generator:
         for key, value in inputs.items():
             inputs[key] = value.to(self.model.device)
 
+        outputs = self.model(input_ids=inputs['input_ids'], labels=inputs['input_ids'])
         question_ids = self.model.generate(**inputs)
+        logits = outputs[1]
+        loss = self.loss_fct(logits.view(-1, logits.size(-1)), inputs['input_ids'].view(-1)).detach().cpu().tolist()
 
-        for i, ids in enumerate(question_ids):
+        for i, (ids, log_ppl) in enumerate(zip(question_ids, loss)):
             input_data[i]['question'] = self.tokenizer.decode(ids, skip_special_tokens=True)
+            input_data[i]['log_ppl'] = log_ppl
 
         return input_data

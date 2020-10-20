@@ -5,7 +5,7 @@
 @Date               : 2020/10/12
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/10/12
+@Last modified date : 2020/10/20
 """
 
 import torch
@@ -77,26 +77,3 @@ class Reader:
             # input_data[i]['predicted_end'] = end
 
         return input_data
-
-
-def main():
-    import json
-
-    input_data = [
-        {'context': 'My name is Sarah.', 'question': 'Where do I live?'},
-        {'context': 'My name is Sarah and I live in London.', 'question': 'Where do I live?'},
-        {'context': 'Sarah lived in London. Jone lived in Canada.', 'question': 'Where do Sarah live?'},
-        {'context': 'Sarah lived in London. Jone lived in Canada.', 'question': 'Where do William live?'},
-    ]
-    reader = Reader(
-        'deepset/bert-base-cased-squad2',
-        '/home/qbbao/003_downloads/cache_transformers-3.1.0',
-        'cuda' if torch.cuda.is_available() else 'cpu',
-    )
-
-    results = reader(input_data)
-    print(json.dumps(results, ensure_ascii=False, indent=4))
-
-
-if __name__ == '__main__':
-    main()

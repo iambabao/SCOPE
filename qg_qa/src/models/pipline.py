@@ -5,12 +5,11 @@
 @Date               : 2020/10/14
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/10/14
+@Last modified date : 2020/10/20
 """
 
 from .generator import Generator
 from .reader import Reader
-from .language_model import LanguageModel
 
 
 class Pipeline:
@@ -26,7 +25,6 @@ class Pipeline:
         pipeline = Pipeline(
             generator_model_name='valhalla/t5-base-qg-hl',
             reader_model_name='deepset/bert-base-cased-squad2',
-            lm_model_name='gpt2',
             cache_dir='your_cache_dir',
             device='cuda' if torch.cuda.is_available() else 'cpu',
         )
@@ -35,14 +33,12 @@ class Pipeline:
         print(json.dumps(results, ensure_ascii=False, indent=4))
     """
 
-    def __init__(self, generator_model_name, reader_model_name, lm_model_name, cache_dir=None, device='cpu'):
+    def __init__(self, generator_model_name, reader_model_name, cache_dir=None, device='cpu'):
         self.generator = Generator(generator_model_name, cache_dir=cache_dir, device=device)
         self.reader = Reader(reader_model_name, cache_dir=cache_dir, device=device)
-        self.lm = LanguageModel(lm_model_name, cache_dir=cache_dir, device=device)
 
     def __call__(self, input_data, lm_key, max_length=None):
         results = self.generator(input_data, max_length=max_length)
         results = self.reader(results, max_length=max_length)
-        results = self.lm(results, lm_key=lm_key, max_length=max_length)
 
         return results

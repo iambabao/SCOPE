@@ -5,7 +5,7 @@
 @Date               : 2020/10/13
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/10/13
+@Last modified date : 2020/10/20
 """
 
 import logging
@@ -14,7 +14,7 @@ import torch
 from tqdm import tqdm
 
 from src.models import Pipeline
-from src.utils import init_logger, log_title, read_json, save_json, read_json_lines
+from src.utils import init_logger, log_title, save_json, read_json_lines
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,6 @@ def run(checkpoint):
     pipeline = Pipeline(
         generator_model_name='valhalla/t5-base-qg-hl',
         reader_model_name='deepset/bert-base-cased-squad2',
-        lm_model_name='gpt2',
         cache_dir='/home/qbbao/003_downloads/cache_transformers-3.1.0',
         device='cuda' if torch.cuda.is_available() else 'cpu',
     )
@@ -80,8 +79,6 @@ def run(checkpoint):
 
 def main():
     init_logger(logging.INFO)
-
-    run('1018/bert_bert-base-cased_128_masked_pu-loss_0.20')
 
 
 if __name__ == '__main__':
