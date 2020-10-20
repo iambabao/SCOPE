@@ -10,12 +10,11 @@
 
 import logging
 import stanza
-import random
 from tqdm import tqdm
 from nltk.tokenize import sent_tokenize
 from collections import defaultdict
 
-from utils import init_logger, read_json, save_json, save_json_lines
+from utils import init_logger, read_file, read_json, save_json, save_json_lines
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +35,7 @@ def convert_data_with_nltk(filein, fileout):
     mismatch = 0
     new_data = []
     for page in tqdm(data, desc='Converting data: {}'.format(filein)):
+        title = page['title']
         for paragraph in page['paragraphs']:
             context = paragraph['context']
             sentences = sent_tokenize(context)
@@ -57,6 +57,8 @@ def convert_data_with_nltk(filein, fileout):
                         logger.warning(_id)
                         continue
                     new_data.append({
+                        'id': _id,
+                        'title': title,
                         'context': sentence,
                         'question': question,
                         'answer': answer['text'],
@@ -87,6 +89,7 @@ def convert_data_with_stanza(filein, fileout):
     mismatch = 0
     new_data = []
     for page in tqdm(data, desc='Converting data: {}'.format(filein)):
+        title = page['title']
         for paragraph in page['paragraphs']:
             context = paragraph['context']
             doc = nlp(context)
@@ -108,6 +111,8 @@ def convert_data_with_stanza(filein, fileout):
                         logger.warning(_id)
                         continue
                     new_data.append({
+                        'id': _id,
+                        'title': title,
                         'context': sentence,
                         'question': question,
                         'answer': answer['text'],
@@ -144,8 +149,8 @@ def main():
     2020-10-16 15:43:54 - INFO - __main__:  match: 10368
     2020-10-16 15:43:54 - INFO - __main__:  mismatch: 20
     """
-    train_data = convert_data_with_nltk('data/SQuAD/train-v2.0.json', 'data/phrase/raw_nltk_train.json')
-    dev_data = convert_data_with_nltk('data/SQuAD/dev-v2.0.json', 'data/phrase/raw_nltk_dev.json')
+    train_data = convert_data_with_nltk('data/SQuAD/train-v2.0.json', 'data/SQuAD/nltk_train_sentence.json')
+    dev_data = convert_data_with_nltk('data/SQuAD/dev-v2.0.json', 'data/SQuAD/nltk_dev_sentence.json')
 
     """
     2020-10-16 15:12:52 - INFO - __main__:  match: 86460
@@ -153,17 +158,37 @@ def main():
     2020-10-16 15:15:21 - INFO - __main__:  match: 10360
     2020-10-16 15:15:21 - INFO - __main__:  mismatch: 28
     """
-    # train_data = convert_data_with_stanza('data/SQuAD/train-v2.0.json', 'data/phrase/raw_stanza_train.json')
-    # dev_data = convert_data_with_stanza('data/SQuAD/dev-v2.0.json', 'data/phrase/raw_stanza_dev.json')
+    # train_data = convert_data_with_stanza('data/SQuAD/train-v2.0.json', 'data/SQuAD/stanza_train_sentence.json')
+    # dev_data = convert_data_with_stanza('data/SQuAD/dev-v2.0.json', 'data/SQuAD/stanza_dev_sentence.json')
 
     # split into train, eval and test set
-    train_data = refine_data(train_data)
-    dev_data = refine_data(dev_data)
-    random.shuffle(dev_data)
-    eval_data, test_data = dev_data[:len(dev_data) // 2], dev_data[len(dev_data) // 2:]
-    save_json_lines(train_data, 'data/phrase/data_train.json')
-    save_json_lines(eval_data, 'data/phrase/data_eval.json')
-    save_json_lines(test_data, 'data/phrase/data_test.json')
+    # refer to: https://github.com/xinyadu/nqg
+    train_split = []
+    eval_split = []
+    test_split = []
+    train_titles = [line.strip() for line in read_file('data/SQuAD/doclist-train.txt')]
+    eval_titles = [line.strip() for line in read_file('data/SQuAD/doclist-eval.txt')]
+    test_titles = [line.strip() for line in read_file('data/SQuAD/doclist-test.txt')]
+    for line in train_data:
+        if line['title'] in train_titles:
+            train_split.append(line)
+        elif line['title'] in test_titles:
+            test_split.append(line)
+        else:
+            logger.info(line['title'])
+    for line in dev_data:
+        if line in dev_data:
+            if line['title'] in eval_titles:
+                eval_split.append(line)
+            else:
+                logger.info(line['title'])
+
+    train_split = refine_data(train_split)
+    eval_split = refine_data(eval_split)
+    test_split = refine_data(test_split)
+    save_json_lines(train_split, 'data/phrase/data_train.json')
+    save_json_lines(eval_split, 'data/phrase/data_eval.json')
+    save_json_lines(test_split, 'data/phrase/data_test.json')
 
 
 if __name__ == '__main__':
