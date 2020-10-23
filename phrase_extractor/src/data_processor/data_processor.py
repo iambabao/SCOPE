@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/10/21
+@Last modified date : 2020/10/23
 """
 
 import os
@@ -13,7 +13,9 @@ import copy
 import json
 import torch
 import logging
+import numpy as np
 from tqdm import tqdm
+from scipy.sparse import coo_matrix, vstack
 from torch.utils.data import TensorDataset
 
 from src.utils import read_json_lines
@@ -93,7 +95,7 @@ def convert_examples_to_features(examples, tokenizer, max_length=512):
             phrase_labels[token_start][token_end] = 1
         encoded["start_labels"] = start_labels
         encoded["end_labels"] = end_labels
-        encoded["phrase_labels"] = phrase_labels
+        encoded["phrase_labels"] = coo_matrix(phrase_labels).reshape(1, max_length * max_length)
 
         del encoded["offset_mapping"]
         features.append(InputFeatures(**encoded))
@@ -178,7 +180,13 @@ class DataProcessor:
         if not do_predict:
             all_start_labels = torch.tensor([f.start_labels for f in features], dtype=torch.long)
             all_end_labels = torch.tensor([f.end_labels for f in features], dtype=torch.long)
-            all_phrase_labels = torch.tensor([f.phrase_labels for f in features], dtype=torch.long)
+            all_phrase_labels = vstack([f.phrase_labels for f in features])
+            all_phrase_labels = torch.sparse_coo_tensor(
+                torch.tensor(np.vstack([all_phrase_labels.row, all_phrase_labels.col]), dtype=torch.long),
+                torch.tensor(all_phrase_labels.data, dtype=torch.long),
+                size=all_phrase_labels.shape,
+                dtype=torch.long,
+            )
             dataset = TensorDataset(
                 all_input_ids, all_attention_mask, all_token_type_ids,
                 all_start_labels, all_end_labels, all_phrase_labels,

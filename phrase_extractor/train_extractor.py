@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/9/28
+@Last modified date : 2020/10/23
 """
 
 import argparse
@@ -25,7 +25,7 @@ from src.models import (
     RobertaExtractor,
 )
 from src.data_processor import DataProcessor
-from src.utils import init_logger, save_json_lines, compute_metrics
+from src.utils import init_logger, save_json_lines, generate_outputs, compute_metrics
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -110,17 +110,16 @@ def train(args, data_processor, model, tokenizer):
         epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
         for step, batch in enumerate(epoch_iterator):
             model.train()
-            batch = tuple(t.to(args.device) for t in batch)
             inputs = {
-                "input_ids": batch[0],
-                "attention_mask": batch[1],
-                "start_labels": batch[-3],
-                "end_labels": batch[-2],
-                "phrase_labels": batch[-1],
+                "input_ids": batch[0].to(args.device),
+                "attention_mask": batch[1].to(args.device),
+                "start_labels": batch[-3].to(args.device),
+                "end_labels": batch[-2].to(args.device),
+                "phrase_labels": batch[-1].to_dense().to(args.device),
             }
             # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use token_type_ids
-            if args.model_type in ["bert", "bert-pu", "xlnet", "albert"]:
-                inputs["token_type_ids"] = batch[2]
+            if args.model_type in ["bert", "xlnet", "albert"]:
+                inputs["token_type_ids"] = batch[2].to(args.device)
 
             outputs = model(**inputs)
             loss = outputs[0]
@@ -201,65 +200,44 @@ def evaluate(args, data_processor, model, tokenizer, prefix="", role="eval"):
     logger.info("Num examples = %d", len(dataset))
     logger.info("Batch size = %d", args.eval_batch_size)
 
-    input_ids = None
-    start_labels = None
-    end_labels = None
-    phrase_labels = None
-    start_predicted = None
-    end_predicted = None
-    phrase_predicted = None
+    eval_outputs = []
     for batch in tqdm(eval_dataloader, desc="Evaluating"):
         model.eval()
-        batch = tuple(t.to(args.device) for t in batch)
         with torch.no_grad():
             inputs = {
-                "input_ids": batch[0],
-                "attention_mask": batch[1],
-                "start_labels": batch[-3],
-                "end_labels": batch[-2],
-                "phrase_labels": batch[-1],
+                "input_ids": batch[0].to(args.device),
+                "attention_mask": batch[1].to(args.device),
+                "start_labels": batch[-3].to(args.device),
+                "end_labels": batch[-2].to(args.device),
+                "phrase_labels": batch[-1].to_dense().to(args.device),
             }
             # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use token_type_ids
             if args.model_type in ["bert", "xlnet", "albert"]:
-                inputs["token_type_ids"] = batch[2]
+                inputs["token_type_ids"] = batch[2].to(args.device)
 
             outputs = model(**inputs)
             phrase_logits, start_logits, end_logits = outputs[1], outputs[2], outputs[3]
 
-            if input_ids is None:
-                input_ids = inputs["input_ids"].detach().cpu().numpy()
-                start_labels = inputs["start_labels"].detach().cpu().numpy()
-                end_labels = inputs["end_labels"].detach().cpu().numpy()
-                phrase_labels = inputs["phrase_labels"].detach().cpu().numpy()
-                start_predicted = start_logits.detach().cpu().numpy()
-                end_predicted = end_logits.detach().cpu().numpy()
-                phrase_predicted = phrase_logits.detach().cpu().numpy()
-            else:
-                input_ids = np.append(input_ids, inputs["input_ids"].detach().cpu().numpy(), axis=0)
-                start_labels = np.append(start_labels, inputs["start_labels"].detach().cpu().numpy(), axis=0)
-                end_labels = np.append(end_labels, inputs["end_labels"].detach().cpu().numpy(), axis=0)
-                phrase_labels = np.append(phrase_labels, inputs["phrase_labels"].detach().cpu().numpy(), axis=0)
-                start_predicted = np.append(start_predicted, start_logits.detach().cpu().numpy(), axis=0)
-                end_predicted = np.append(end_predicted, end_logits.detach().cpu().numpy(), axis=0)
-                phrase_predicted = np.append(phrase_predicted, phrase_logits.detach().cpu().numpy(), axis=0)
-    start_predicted = np.argmax(start_predicted, axis=-1)
-    end_predicted = np.argmax(end_predicted, axis=-1)
-    phrase_predicted = np.argmax(phrase_predicted, axis=-1)
-    outputs, results = compute_metrics(
-        input_ids, phrase_labels, start_labels, end_labels, start_predicted, end_predicted, phrase_predicted, tokenizer
-    )
-
+            input_ids = inputs["input_ids"].detach().cpu().numpy()
+            phrase_labels = inputs["phrase_labels"].detach().cpu().numpy()
+            start_predicted = np.argmax(start_logits.detach().cpu().numpy(), axis=-1)
+            end_predicted = np.argmax(end_logits.detach().cpu().numpy(), axis=-1)
+            phrase_predicted = np.argmax(phrase_logits.detach().cpu().numpy(), axis=-1)
+            eval_outputs.extend(generate_outputs(
+                input_ids, phrase_labels, start_predicted, end_predicted, phrase_predicted, tokenizer
+            ))
     eval_outputs_file = os.path.join(args.output_dir, prefix, "{}_outputs.json".format(role))
-    save_json_lines(outputs, eval_outputs_file)
+    save_json_lines(eval_outputs, eval_outputs_file)
 
+    eval_results = compute_metrics(eval_outputs)
     eval_results_file = os.path.join(args.output_dir, prefix, "{}_results.txt".format(role))
     with open(eval_results_file, "w") as writer:
         logger.info("***** Eval results {} *****".format(prefix))
-        for key in results.keys():
-            logger.info("%s = %s", key, str(results[key]))
-            writer.write("%s = %s\n" % (key, str(results[key])))
+        for key in eval_results.keys():
+            logger.info("%s = %s", key, str(eval_results[key]))
+            writer.write("%s = %s\n" % (key, str(eval_results[key])))
 
-    return results
+    return eval_results
 
 
 def main():

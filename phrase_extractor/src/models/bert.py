@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/10/15
+@Last modified date : 2020/10/23
 """
 
 import torch
@@ -90,6 +90,7 @@ class BertExtractor(BertPreTrainedModel):
         outputs = (phrase_mask.unsqueeze(-1) * phrase_logits,) + outputs
 
         if None not in [start_labels, end_labels, phrase_labels]:
+            phrase_labels = phrase_labels.reshape(-1, max_seq_length, max_seq_length)
             if self.loss_candidates == 'masked':
                 golden_mask = torch.logical_and(
                     start_labels.unsqueeze(-1).expand(-1, -1, max_seq_length),

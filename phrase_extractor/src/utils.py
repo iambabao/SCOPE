@@ -178,15 +178,13 @@ def load_glove_embedding(data_file, word_list):
 
 
 # ====================
-def compute_metrics(
-    input_ids, phrase_labels, start_labels, end_labels, start_predicted, end_predicted, phrase_predicted, tokenizer
-):
+def generate_outputs(input_ids, phrase_labels, start_predicted, end_predicted, phrase_predicted, tokenizer):
     outputs = []
-    results = {'Golden': 0, 'Predicted': 0, 'Matched': 0}
     for ids, labels, start_flags, end_flags, phrase_flags in zip(
             input_ids, phrase_labels, start_predicted, end_predicted, phrase_predicted
     ):
         item = {'context': tokenizer.decode(ids, skip_special_tokens=True), 'golden': [], 'predicted': []}
+        labels = labels.reshape([len(ids), len(ids)])
         for i in range(labels.shape[0]):
             for j in range(i, labels.shape[1]):
                 if labels[i][j] == 1:
@@ -198,6 +196,13 @@ def compute_metrics(
                 if phrase_flags[i][j] == 1:
                     item['predicted'].append(tokenizer.decode(ids[i:j + 1], skip_special_tokens=True))
         outputs.append(item)
+
+    return outputs
+
+
+def compute_metrics(outputs):
+    results = {'Golden': 0, 'Predicted': 0, 'Matched': 0}
+    for item in outputs:
         results['Golden'] += len(set(item['golden']))
         results['Predicted'] += len(set(item['predicted']))
         results['Matched'] += len(set(item['golden']) & set(item['predicted']))
@@ -213,7 +218,5 @@ def compute_metrics(
             results['Precision'] = results['Matched'] / results['Predicted']
             results['Recall'] = results['Matched'] / results['Golden']
             results['F1'] = 2 * results['Precision'] * results['Recall'] / (results['Precision'] + results['Recall'])
-    results['Recall_of_start'] = ((start_labels == 1) & start_predicted).sum() / start_labels.sum()
-    results['Recall_of_end'] = 1.0 * ((end_labels == 1) & end_predicted).sum() / (1.0 * end_labels.sum())
 
-    return outputs, results
+    return results
