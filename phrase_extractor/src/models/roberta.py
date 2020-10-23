@@ -5,17 +5,20 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/10/15
+@Last modified date : 2020/10/21
 """
 
 import torch
 import torch.nn as nn
-from transformers import BertModel, BertPreTrainedModel
+from transformers import BertPreTrainedModel, RobertaConfig, RobertaModel
 
 from .utils import ce_loss, pu_loss
 
 
-class BertExtractor(BertPreTrainedModel):
+class RobertaExtractor(BertPreTrainedModel):
+    config_class = RobertaConfig
+    base_model_prefix = "roberta"
+
     def __init__(self, config, **kwargs):
         super().__init__(config)
 
@@ -25,7 +28,7 @@ class BertExtractor(BertPreTrainedModel):
         self.prior = kwargs.get('prior')
         self.frozen_layers = kwargs.get('frozen_layers')
 
-        self.bert = BertModel(config)
+        self.roberta = RobertaModel(config)
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.start_output_layer = nn.Sequential(
             self.dense,
@@ -65,7 +68,7 @@ class BertExtractor(BertPreTrainedModel):
         end_labels=None,
         phrase_labels=None,
     ):
-        outputs = self.bert(
+        outputs = self.roberta(
             input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,

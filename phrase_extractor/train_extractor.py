@@ -22,6 +22,7 @@ from transformers import WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup
 
 from src.models import (
     BertExtractor,
+    RobertaExtractor,
 )
 from src.data_processor import DataProcessor
 from src.utils import init_logger, save_json_lines, compute_metrics
@@ -33,6 +34,7 @@ except ImportError:
 
 MODEL_MAPPING = {
     'bert': BertExtractor,
+    'roberta': RobertaExtractor,
 }
 
 logger = logging.getLogger(__name__)
@@ -184,12 +186,12 @@ def train(args, data_processor, model, tokenizer):
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, data_processor, model, tokenizer, prefix=""):
+def evaluate(args, data_processor, model, tokenizer, prefix="", role="eval"):
     if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
         os.makedirs(args.output_dir)
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
-    dataset = data_processor.load_and_cache_data("eval", tokenizer)
+    dataset = data_processor.load_and_cache_data(role, tokenizer)
     # Note that DistributedSampler samples randomly
     eval_sampler = SequentialSampler(dataset) if args.local_rank == -1 else DistributedSampler(dataset)
     eval_dataloader = DataLoader(dataset, sampler=eval_sampler, batch_size=args.eval_batch_size)
@@ -218,7 +220,7 @@ def evaluate(args, data_processor, model, tokenizer, prefix=""):
                 "phrase_labels": batch[-1],
             }
             # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use token_type_ids
-            if args.model_type in ["bert", "bert-pu", "xlnet", "albert"]:
+            if args.model_type in ["bert", "xlnet", "albert"]:
                 inputs["token_type_ids"] = batch[2]
 
             outputs = model(**inputs)
@@ -247,10 +249,10 @@ def evaluate(args, data_processor, model, tokenizer, prefix=""):
         input_ids, phrase_labels, start_labels, end_labels, start_predicted, end_predicted, phrase_predicted, tokenizer
     )
 
-    eval_outputs_file = os.path.join(args.output_dir, prefix, "eval_outputs.json")
+    eval_outputs_file = os.path.join(args.output_dir, prefix, "{}_outputs.json".format(role))
     save_json_lines(outputs, eval_outputs_file)
 
-    eval_results_file = os.path.join(args.output_dir, prefix, "eval_results.txt")
+    eval_results_file = os.path.join(args.output_dir, prefix, "{}_results.txt".format(role))
     with open(eval_results_file, "w") as writer:
         logger.info("***** Eval results {} *****".format(prefix))
         for key in results.keys():
@@ -324,9 +326,7 @@ def main():
         choices=["all", "masked"],
         help="The span candidates used to compute loss.",
     )
-    parser.add_argument(
-        "--loss_type", default="ce-loss", type=str, choices=["ce-loss", "pu-loss"], help="The loss type.",
-    )
+    parser.add_argument("--loss_type", default="ce", type=str, choices=["ce", "pu"], help="The loss type.")
     parser.add_argument(
         "--prior", default=0.10, type=float, help="The estimated prior distribution of positive samples."
     )
@@ -334,7 +334,7 @@ def main():
         "--frozen_layers", default=-1, type=int, help="Number of frozen layers in pre-trained language model."
     )
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
-    parser.add_argument("--do_eval", action="store_true", help="Whether to run eval on the dev set.")
+    parser.add_argument("--do_eval", action="store_true", help="Whether to run eval on the eval set.")
     parser.add_argument(
         "--evaluate_during_training", action="store_true", help="Rul evaluation during training at each logging step."
     )
@@ -536,7 +536,7 @@ def main():
             model.to(args.device)
 
             # Evaluate
-            result = evaluate(args, data_processor, model, tokenizer, prefix=global_step)
+            result = evaluate(args, data_processor, model, tokenizer, prefix=global_step, role="test")
 
             result = dict((k + ("_{}".format(global_step) if global_step else ""), v) for k, v in result.items())
             results.update(result)

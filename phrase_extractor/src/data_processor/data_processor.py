@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/9/9
+@Last modified date : 2020/10/21
 """
 
 import os
@@ -101,9 +101,8 @@ def convert_examples_to_features(examples, tokenizer, max_length=512):
         if ex_index < 5:
             logger.info("*** Example ***")
             logger.info("guid: {}".format(encoded["guid"]))
+            logger.info("tokens: {}".format(tokenizer.decode(encoded["input_ids"], skip_special_tokens=True)))
             logger.info("input_ids: {}".format(encoded["input_ids"]))
-            logger.info("attention_mask: {}".format(encoded["attention_mask"]))
-            logger.info("token_type_ids: {}".format(encoded["token_type_ids"]))
             logger.info("start_labels: {}".format(encoded["start_labels"]))
             logger.info("end_labels: {}".format(encoded["end_labels"]))
 
@@ -171,7 +170,7 @@ class DataProcessor:
         all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
         all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
         # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use token_type_ids
-        if self.model_type in ["bert", "bert-pu", "xlnet", "albert"]:
+        if self.model_type in ["bert", "xlnet", "albert"]:
             all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
         else:
             all_token_type_ids = torch.tensor([[0] * self.max_seq_length for _ in features], dtype=torch.long)
