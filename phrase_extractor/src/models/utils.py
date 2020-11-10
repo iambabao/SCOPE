@@ -5,7 +5,7 @@
 @Date               : 2020/10/9
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/10/9
+@Last modified date : 2020/11/10
 """
 
 import torch
@@ -38,7 +38,10 @@ def pu_loss(logits, golden, mask=None):
     labels = golden * torch.ones([logits.shape[0]], dtype=torch.long).to(logits.device)
     loss = loss_function(logits, labels)
     if mask is not None:
-        loss = torch.sum(mask.view(-1) * loss) / torch.sum(mask)
+        if torch.sum(mask) != 0:
+            loss = torch.sum(mask.view(-1) * loss) / torch.sum(mask)
+        else:
+            loss = 0
     else:
         loss = torch.mean(loss)
     return loss

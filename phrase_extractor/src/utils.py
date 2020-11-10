@@ -5,14 +5,13 @@
 @Date               : 2020/1/1
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/4/25
+@Last modified date : 2020/11/10
 """
 
 import json
 import random
 import logging
 import numpy as np
-from sklearn.metrics import precision_recall_fscore_support
 
 logger = logging.getLogger(__name__)
 
@@ -178,34 +177,47 @@ def load_glove_embedding(data_file, word_list):
 
 
 # ====================
-def generate_outputs(input_ids, phrase_labels, start_predicted, end_predicted, phrase_predicted, tokenizer):
+def generate_outputs(offset_mappings, phrase_labels, start_predicted, end_predicted, phrase_predicted, tokenizer):
     outputs = []
-    for ids, labels, start_flags, end_flags, phrase_flags in zip(
-            input_ids, phrase_labels, start_predicted, end_predicted, phrase_predicted
+    for mapping, labels, start_flags, end_flags, phrase_flags in zip(
+        offset_mappings, phrase_labels, start_predicted, end_predicted, phrase_predicted
     ):
-        item = {'context': tokenizer.decode(ids, skip_special_tokens=True), 'golden': [], 'predicted': []}
-        labels = labels.reshape([len(ids), len(ids)])
+        item = {'golden': [], 'predicted': []}
+        labels = labels.reshape(phrase_flags.shape)
         for i in range(labels.shape[0]):
             for j in range(i, labels.shape[1]):
                 if labels[i][j] == 1:
-                    item['golden'].append(tokenizer.decode(ids[i:j + 1], skip_special_tokens=True))
+                    start, end = mapping[i][0], mapping[j][1]
+                    item['golden'].append((int(start), int(end)))
         for i, is_start in enumerate(start_flags):
             if is_start != 1: continue
             for j, is_end in enumerate(end_flags):
                 if is_end != 1: continue
                 if phrase_flags[i][j] == 1:
-                    item['predicted'].append(tokenizer.decode(ids[i:j + 1], skip_special_tokens=True))
+                    start, end = mapping[i][0], mapping[j][1]
+                    item['predicted'].append((int(start), int(end)))
         outputs.append(item)
-
     return outputs
+
+
+def refine_outputs(examples, outputs):
+    refined_outputs = []
+    for example, entry in zip(examples, outputs):
+        context = example.context
+        golden = [(context[start:end], start, end) for start, end in entry['golden']]
+        predicted = [(context[start:end], start, end) for start, end in entry['predicted']]
+        refined_outputs.append({'context': context, 'golden': golden, 'predicted': predicted})
+    return refined_outputs
 
 
 def compute_metrics(outputs):
     results = {'Golden': 0, 'Predicted': 0, 'Matched': 0}
     for item in outputs:
-        results['Golden'] += len(set(item['golden']))
-        results['Predicted'] += len(set(item['predicted']))
-        results['Matched'] += len(set(item['golden']) & set(item['predicted']))
+        golden = set([v[0] for v in item['golden']])
+        predicted = set([v[0] for v in item['predicted']])
+        results['Golden'] += len(golden)
+        results['Predicted'] += len(predicted)
+        results['Matched'] += len(golden & predicted)
     if results['Golden'] == 0:
         if results['Predicted'] == 0:
             results['Precision'] = results['Recall'] = results['F1'] = 1.0

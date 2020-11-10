@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/10/23
+@Last modified date : 2020/11/10
 """
 
 import argparse
@@ -25,7 +25,7 @@ from src.models import (
     RobertaExtractor,
 )
 from src.data_processor import DataProcessor
-from src.utils import init_logger, save_json_lines, generate_outputs, compute_metrics
+from src.utils import init_logger, save_json_lines, generate_outputs, refine_outputs, compute_metrics
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -45,7 +45,7 @@ def train(args, data_processor, model, tokenizer):
         tb_writer = SummaryWriter()
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
-    train_dataset = data_processor.load_and_cache_data("train", tokenizer)
+    _, train_dataset = data_processor.load_and_cache_data("train", tokenizer)
     train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size)
 
@@ -190,7 +190,7 @@ def evaluate(args, data_processor, model, tokenizer, prefix="", role="eval"):
         os.makedirs(args.output_dir)
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
-    dataset = data_processor.load_and_cache_data(role, tokenizer)
+    examples, dataset = data_processor.load_and_cache_data(role, tokenizer)
     # Note that DistributedSampler samples randomly
     eval_sampler = SequentialSampler(dataset) if args.local_rank == -1 else DistributedSampler(dataset)
     eval_dataloader = DataLoader(dataset, sampler=eval_sampler, batch_size=args.eval_batch_size)
@@ -218,14 +218,15 @@ def evaluate(args, data_processor, model, tokenizer, prefix="", role="eval"):
             outputs = model(**inputs)
             phrase_logits, start_logits, end_logits = outputs[1], outputs[2], outputs[3]
 
-            input_ids = inputs["input_ids"].detach().cpu().numpy()
-            phrase_labels = inputs["phrase_labels"].detach().cpu().numpy()
+            offset_mapping = batch[3].numpy()
+            phrase_labels = batch[-1].to_dense().numpy()
             start_predicted = np.argmax(start_logits.detach().cpu().numpy(), axis=-1)
             end_predicted = np.argmax(end_logits.detach().cpu().numpy(), axis=-1)
             phrase_predicted = np.argmax(phrase_logits.detach().cpu().numpy(), axis=-1)
             eval_outputs.extend(generate_outputs(
-                input_ids, phrase_labels, start_predicted, end_predicted, phrase_predicted, tokenizer
+                offset_mapping, phrase_labels, start_predicted, end_predicted, phrase_predicted, tokenizer
             ))
+    eval_outputs = refine_outputs(examples, eval_outputs)
     eval_outputs_file = os.path.join(args.output_dir, prefix, "{}_outputs.json".format(role))
     save_json_lines(eval_outputs, eval_outputs_file)
 
@@ -514,6 +515,7 @@ def main():
             model.to(args.device)
 
             # Evaluate
+            # Note that we report the final results on test set
             result = evaluate(args, data_processor, model, tokenizer, prefix=global_step, role="test")
 
             result = dict((k + ("_{}".format(global_step) if global_step else ""), v) for k, v in result.items())

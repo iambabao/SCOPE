@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/10/23
+@Last modified date : 2020/11/10
 """
 
 import os
@@ -43,12 +43,13 @@ class InputExample(object):
 
 
 class InputFeatures(object):
-    def __init__(self, guid, input_ids, attention_mask=None, token_type_ids=None,
+    def __init__(self, guid, input_ids, attention_mask=None, token_type_ids=None, offset_mapping=None,
                  start_labels=None, end_labels=None, phrase_labels=None):
         self.guid = guid
         self.input_ids = input_ids
         self.attention_mask = attention_mask
         self.token_type_ids = token_type_ids
+        self.offset_mapping = offset_mapping
         self.start_labels = start_labels
         self.end_labels = end_labels
         self.phrase_labels = phrase_labels
@@ -97,7 +98,6 @@ def convert_examples_to_features(examples, tokenizer, max_length=512):
         encoded["end_labels"] = end_labels
         encoded["phrase_labels"] = coo_matrix(phrase_labels).reshape(1, max_length * max_length)
 
-        del encoded["offset_mapping"]
         features.append(InputFeatures(**encoded))
 
         if ex_index < 5:
@@ -139,18 +139,12 @@ class DataProcessor:
         self.overwrite_cache = overwrite_cache
 
     def load_and_cache_data(self, role, tokenizer):
-        cached_file = os.path.join(
-            self.cache_dir,
-            "cached_{}_{}_{}".format(
-                role,
-                list(filter(None, self.model_name_or_path.split("/"))).pop(),
-                str(self.max_seq_length),
-            ),
-        )
+        os.makedirs(self.cache_dir, exist_ok=True)
 
-        if os.path.exists(cached_file) and not self.overwrite_cache:
-            logger.info("Loading features from cached file {}".format(cached_file))
-            features = torch.load(cached_file)
+        cached_examples = os.path.join(self.cache_dir, "cached_example_{}".format(role))
+        if os.path.exists(cached_examples) and not self.overwrite_cache:
+            logger.info("Loading examples from cached file {}".format(cached_examples))
+            examples = torch.load(cached_examples)
         else:
             examples = []
             for line in tqdm(
@@ -160,13 +154,26 @@ class DataProcessor:
                 sample = {'guid': len(examples)}
                 sample.update(self._load_line(line))
                 examples.append(InputExample(**sample))
+            logger.info("Saving examples into cached file {}".format(cached_examples))
+            torch.save(examples, cached_examples)
+
+        cached_features = os.path.join(
+            self.cache_dir,
+            "cached_feature_{}_{}_{}".format(
+                role,
+                list(filter(None, self.model_name_or_path.split("/"))).pop(),
+                str(self.max_seq_length),
+            ),
+        )
+        if os.path.exists(cached_features) and not self.overwrite_cache:
+            logger.info("Loading features from cached file {}".format(cached_features))
+            features = torch.load(cached_features)
+        else:
             features = convert_examples_to_features(examples, tokenizer, self.max_seq_length)
+            logger.info("Saving features into cached file {}".format(cached_features))
+            torch.save(features, cached_features)
 
-            logger.info("Saving features into cached file {}".format(cached_file))
-            os.makedirs(self.cache_dir, exist_ok=True)
-            torch.save(features, cached_file)
-
-        return self._create_tensor_dataset(features)
+        return examples, self._create_tensor_dataset(features)
 
     def _create_tensor_dataset(self, features, do_predict=False):
         all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
@@ -176,6 +183,7 @@ class DataProcessor:
             all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
         else:
             all_token_type_ids = torch.tensor([[0] * self.max_seq_length for _ in features], dtype=torch.long)
+        all_offset_mappings = torch.tensor([f.offset_mapping for f in features], dtype=torch.long)
 
         if not do_predict:
             all_start_labels = torch.tensor([f.start_labels for f in features], dtype=torch.long)
@@ -188,11 +196,11 @@ class DataProcessor:
                 dtype=torch.long,
             )
             dataset = TensorDataset(
-                all_input_ids, all_attention_mask, all_token_type_ids,
+                all_input_ids, all_attention_mask, all_token_type_ids, all_offset_mappings,
                 all_start_labels, all_end_labels, all_phrase_labels,
             )
         else:
-            dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids)
+            dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_offset_mappings)
 
         return dataset
 
