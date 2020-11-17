@@ -5,22 +5,25 @@
 @Date               : 2020/10/14
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/10/20
+@Last modified date : 2020/11/11
 """
 
+import json
 from .generator import Generator
 from .reader import Reader
 
 
 class Pipeline:
     """
+    Examples:
+        import json
+        import torch
 
-    Example:
         input_data = [
-            {'context': 'My name is <hl> Sarah <hl> .', 'raw_answer': 'Sarah'},
-            {'context': 'My name is Sarah and I live in <hl> London <hl> .', 'raw_answer': 'London'},
-            {'context': 'Sarah lived in London. Jone lived in <hl> Canada <hl> .', 'raw_answer': 'Canada'},
-            {'context': 'Sarah <hl> lived <hl> in London. Jone lived in Canada.', 'raw_answer': 'lived'},
+            {'context': 'My name is Sarah.', 'answer': ('Sarah', 11, 16)},
+            {'context': 'My name is Sarah and I live in London.', 'answer': ('London', 31, 37)},
+            {'context': 'Sarah lived in London. Jone lived in Canada.', 'answer': ('Canada', 37, 43)},
+            {'context': 'Sarah lived in London. Jone lived in Canada.', 'answer': ('lived', 28, 33)},
         ]
         pipeline = Pipeline(
             generator_model_name='valhalla/t5-base-qg-hl',
@@ -29,7 +32,7 @@ class Pipeline:
             device='cuda' if torch.cuda.is_available() else 'cpu',
         )
 
-        results = pipeline(input_data, lm_key='question')
+        results = pipeline(input_data, beam_size=5)
         print(json.dumps(results, ensure_ascii=False, indent=4))
     """
 
@@ -37,8 +40,8 @@ class Pipeline:
         self.generator = Generator(generator_model_name, cache_dir=cache_dir, device=device)
         self.reader = Reader(reader_model_name, cache_dir=cache_dir, device=device)
 
-    def __call__(self, input_data, lm_key, max_length=None):
-        results = self.generator(input_data, max_length=max_length)
-        results = self.reader(results, max_length=max_length)
+    def __call__(self, input_data, beam_size=1, max_length=None, batch_size=8):
+        results = self.generator(input_data, beam_size=beam_size, max_length=max_length, batch_size=batch_size)
+        results = self.reader(results, max_length=max_length, batch_size=batch_size)
 
         return results
