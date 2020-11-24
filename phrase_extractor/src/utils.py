@@ -5,7 +5,7 @@
 @Date               : 2020/1/1
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/11/10
+@Last modified date : 2020/11/24
 """
 
 import json
@@ -177,7 +177,7 @@ def load_glove_embedding(data_file, word_list):
 
 
 # ====================
-def generate_outputs(offset_mappings, phrase_labels, start_predicted, end_predicted, phrase_predicted, tokenizer):
+def generate_outputs(offset_mappings, phrase_labels, start_predicted, end_predicted, phrase_predicted):
     outputs = []
     for mapping, labels, start_flags, end_flags, phrase_flags in zip(
         offset_mappings, phrase_labels, start_predicted, end_predicted, phrase_predicted

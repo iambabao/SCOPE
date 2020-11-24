@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/11/10
+@Last modified date : 2020/11/24
 """
 
 import argparse
@@ -224,7 +224,7 @@ def evaluate(args, data_processor, model, tokenizer, prefix="", role="eval"):
             end_predicted = np.argmax(end_logits.detach().cpu().numpy(), axis=-1)
             phrase_predicted = np.argmax(phrase_logits.detach().cpu().numpy(), axis=-1)
             eval_outputs.extend(generate_outputs(
-                offset_mapping, phrase_labels, start_predicted, end_predicted, phrase_predicted, tokenizer
+                offset_mapping, phrase_labels, start_predicted, end_predicted, phrase_predicted
             ))
     eval_outputs = refine_outputs(examples, eval_outputs)
     eval_outputs_file = os.path.join(args.output_dir, prefix, "{}_outputs.json".format(role))

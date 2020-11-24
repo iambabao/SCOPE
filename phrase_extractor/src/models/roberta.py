@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/10/23
+@Last modified date : 2020/11/24
 """
 
 import torch
@@ -26,7 +26,7 @@ class RobertaExtractor(BertPreTrainedModel):
         self.loss_candidates = kwargs.get('loss_candidates')
         self.loss_type = kwargs.get('loss_type')
         self.prior = kwargs.get('prior')
-        self.frozen_layers = kwargs.get('frozen_layers')
+        self.frozen_layers = kwargs.get('frozen_layers', 0)
 
         self.roberta = RobertaModel(config)
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
