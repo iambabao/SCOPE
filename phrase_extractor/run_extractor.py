@@ -5,7 +5,7 @@
 @Date               : 2020/11/24
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/11/24
+@Last modified date : 2020/12/8
 """
 
 import logging
@@ -20,12 +20,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--model_name_or_path",
-        type=str,
-        required=True,
-        help="Path to pretrained model or model identifier from huggingface.co/models",
-    )
+    parser.add_argument("--model_name_or_path", type=str, required=True, help="Path to pretrained model")
     parser.add_argument("--input_file", type=str, required=True, help="The input file")
     parser.add_argument("--output_file", type=str, required=True, help="The output file")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size per GPU/CPU")

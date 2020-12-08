@@ -5,7 +5,7 @@
 @Date               : 2020/10/12
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/11/12
+@Last modified date : 2020/12/8
 """
 
 import torch
@@ -101,7 +101,7 @@ class Reader:
             end_scores = torch.softmax(end_scores, dim=-1).detach().cpu().tolist()
 
             for i, (start_score, end_score, (start, end)) in enumerate(zip(start_scores, end_scores, answer_indices)):
-                all_scores.append(start_score[start] * end_score[end])
+                all_scores.append((start_score[start], end_score[end]))
 
         for i in range(len(input_data)):
             start = i * beam_size
