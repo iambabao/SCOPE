@@ -5,13 +5,14 @@
 @Date               : 2020/7/26
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/11/24
+@Last modified date : 2020/12/13
 """
 
 import argparse
 import logging
 import os
 import glob
+import json
 import torch
 import numpy as np
 from tqdm import tqdm
@@ -20,12 +21,9 @@ from torch.utils.data.distributed import DistributedSampler
 from transformers import AutoConfig, AutoTokenizer, set_seed
 from transformers import WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup
 
-from src.models import (
-    BertExtractor,
-    RobertaExtractor,
-)
+from src.models import *
 from src.data_processor import DataProcessor
-from src.utils import init_logger, save_json_lines, generate_outputs, refine_outputs, compute_metrics
+from src.utils import init_logger, save_json, save_json_lines, generate_outputs, refine_outputs, compute_metrics
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -35,17 +33,18 @@ except ImportError:
 MODEL_MAPPING = {
     'bert': BertExtractor,
     'roberta': RobertaExtractor,
+    'bert-gnn': BertGNNExtractor,
 }
 
 logger = logging.getLogger(__name__)
 
 
-def train(args, data_processor, model, tokenizer):
+def train(args, data_processor, model, tokenizer, role):
     if args.local_rank in [-1, 0]:
         tb_writer = SummaryWriter()
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
-    _, train_dataset = data_processor.load_and_cache_data("train", tokenizer)
+    _, train_dataset = data_processor.load_and_cache_data(role, tokenizer)
     train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size)
 
@@ -154,7 +153,7 @@ def train(args, data_processor, model, tokenizer):
                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     # Only evaluate when single GPU otherwise metrics may not average well
                     if args.local_rank == -1 and args.evaluate_during_training:
-                        results = evaluate(args, data_processor, model, tokenizer)
+                        results = evaluate(args, data_processor, model, tokenizer, role="eval", prefix=str(global_step))
                         for key, value in results.items():
                             tb_writer.add_scalar("eval_{}".format(key), value, global_step)
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
@@ -185,9 +184,13 @@ def train(args, data_processor, model, tokenizer):
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, data_processor, model, tokenizer, prefix="", role="eval"):
-    if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
-        os.makedirs(args.output_dir)
+def evaluate(args, data_processor, model, tokenizer, role, prefix=""):
+    if prefix == "":
+        output_dir = args.output_dir
+    else:
+        output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(prefix))
+    if not os.path.exists(output_dir) and args.local_rank in [-1, 0]:
+        os.makedirs(output_dir)
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     examples, dataset = data_processor.load_and_cache_data(role, tokenizer)
@@ -227,11 +230,11 @@ def evaluate(args, data_processor, model, tokenizer, prefix="", role="eval"):
                 offset_mapping, phrase_labels, start_predicted, end_predicted, phrase_predicted
             ))
     eval_outputs = refine_outputs(examples, eval_outputs)
-    eval_outputs_file = os.path.join(args.output_dir, prefix, "{}_outputs.json".format(role))
+    eval_outputs_file = os.path.join(output_dir, "{}_outputs.json".format(role))
     save_json_lines(eval_outputs, eval_outputs_file)
 
     eval_results = compute_metrics(eval_outputs)
-    eval_results_file = os.path.join(args.output_dir, prefix, "{}_results.txt".format(role))
+    eval_results_file = os.path.join(output_dir, "{}_results.txt".format(role))
     with open(eval_results_file, "w") as writer:
         logger.info("***** Eval results {} *****".format(prefix))
         for key in eval_results.keys():
@@ -244,35 +247,48 @@ def evaluate(args, data_processor, model, tokenizer, prefix="", role="eval"):
 def main():
     parser = argparse.ArgumentParser()
 
-    # Required parameters
-    parser.add_argument(
-        "--model_type",
-        default=None,
-        type=str,
-        required=True,
-        help="Model type",
-    )
+    # Hyper parameters
+    parser.add_argument("--model_type", type=str, required=True, help="Model type")
     parser.add_argument(
         "--model_name_or_path",
-        default=None,
         type=str,
         required=True,
         help="Path to pretrained model or model identifier from huggingface.co/models",
     )
     parser.add_argument(
+        "--max_seq_length",
+        default=128,
+        type=int,
+        help="The maximum total input sequence length after WordPiece tokenization. Sequences "
+        "longer than this will be truncated, and sequences shorter than this will be padded.",
+    )
+    parser.add_argument(
+        "--do_lower_case", action="store_true", help="Set this flag if you are using an uncased model."
+    )
+    parser.add_argument("--loss_type", default="ce", type=str, choices=["ce", "pu"], help="The loss type.")
+    parser.add_argument("--prior_token", type=float, required=True, help="Estimated prior distribution for token.")
+    parser.add_argument("--prior_phrase", type=float, required=True, help="Estimated prior distribution for phrase.")
+
+    # Directory parameters
+    parser.add_argument(
         "--data_dir",
-        default=None,
         type=str,
         required=True,
         help="The input data dir. Should contain the .tsv files (or other data files) for the task.",
     )
     parser.add_argument(
         "--output_dir",
-        default=None,
         type=str,
         required=True,
         help="The output directory where the model checkpoints and predictions will be written.",
     )
+    parser.add_argument(
+        "--cache_dir",
+        default="",
+        type=str,
+        help="Where do you want to store the pre-trained models downloaded from s3",
+    )
+    parser.add_argument("--log_file", default=None, type=str, help="Log file.")
 
     # Other parameters
     parser.add_argument(
@@ -284,43 +300,11 @@ def main():
         type=str,
         help="Pretrained tokenizer name or path if not the same as model_name",
     )
-    parser.add_argument(
-        "--cache_dir",
-        default="",
-        type=str,
-        help="Where do you want to store the pre-trained models downloaded from s3",
-    )
-    parser.add_argument("--log_file", default=None, type=str, help="Log file.")
-    parser.add_argument(
-        "--max_seq_length",
-        default=128,
-        type=int,
-        help="The maximum total input sequence length after WordPiece tokenization. Sequences "
-        "longer than this will be truncated, and sequences shorter than this will be padded.",
-    )
-    parser.add_argument(
-        "--loss_candidates",
-        default="all",
-        type=str,
-        choices=["all", "masked"],
-        help="The span candidates used to compute loss.",
-    )
-    parser.add_argument("--loss_type", default="ce", type=str, choices=["ce", "pu"], help="The loss type.")
-    parser.add_argument(
-        "--prior", default=0.10, type=float, help="The estimated prior distribution of positive samples."
-    )
-    parser.add_argument(
-        "--frozen_layers", default=-1, type=int, help="Number of frozen layers in pre-trained language model."
-    )
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
     parser.add_argument("--do_eval", action="store_true", help="Whether to run eval on the eval set.")
     parser.add_argument(
         "--evaluate_during_training", action="store_true", help="Rul evaluation during training at each logging step."
     )
-    parser.add_argument(
-        "--do_lower_case", action="store_true", help="Set this flag if you are using an uncased model."
-    )
-
     parser.add_argument("--per_gpu_train_batch_size", default=8, type=int, help="Batch size per GPU/CPU for training.")
     parser.add_argument(
         "--per_gpu_eval_batch_size", default=8, type=int, help="Batch size per GPU/CPU for evaluation."
@@ -451,10 +435,9 @@ def main():
         from_tf=bool(".ckpt" in args.model_name_or_path),
         config=config,
         cache_dir=args.cache_dir if args.cache_dir else None,
-        loss_candidates=args.loss_candidates,
         loss_type=args.loss_type,
-        prior=args.prior,
-        frozen_layers=args.frozen_layers,
+        prior_token=args.prior_token,
+        prior_phrase=args.prior_phrase,
     )
     model.to(args.device)
 
@@ -474,7 +457,7 @@ def main():
 
     # Training
     if args.do_train:
-        global_step, tr_loss = train(args, data_processor, model, tokenizer)
+        global_step, tr_loss = train(args, data_processor, model, tokenizer, role="train")
         logger.info("global_step = %s, average loss = %s", global_step, tr_loss)
 
     # Save the trained model and the tokenizer
@@ -503,25 +486,28 @@ def main():
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
 
         for checkpoint in checkpoints:
-            # Reload the model
             global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
+            try: int(global_step)
+            except ValueError: global_step = ""
+
+            # Reload the model
             model = model_class.from_pretrained(
                 checkpoint,
-                loss_candidates=args.loss_candidates,
                 loss_type=args.loss_type,
-                prior=args.prior,
-                frozen_layers=args.frozen_layers,
+                prior_token=args.prior_token,
+                prior_phrase=args.prior_phrase,
             )
             model.to(args.device)
 
             # Evaluate
             # Note that we report the final results on test set
-            result = evaluate(args, data_processor, model, tokenizer, prefix=global_step, role="test")
+            result = evaluate(args, data_processor, model, tokenizer, role="test", prefix=global_step)
 
             result = dict((k + ("_{}".format(global_step) if global_step else ""), v) for k, v in result.items())
             results.update(result)
 
-    logger.info("Results: {}".format(results))
+    logger.info("Results: {}".format(json.dumps(results, ensure_ascii=False, indent=4)))
+    save_json(results, os.path.join(args.output_dir, "all_results.json"))
 
 
 if __name__ == "__main__":

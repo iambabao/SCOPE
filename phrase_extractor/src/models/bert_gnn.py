@@ -10,42 +10,48 @@
 
 import torch
 import torch.nn as nn
-from transformers import BertPreTrainedModel, RobertaConfig, RobertaModel
+from transformers import BertModel, BertPreTrainedModel
 
+from .pyramid_gnn import PyramidGNN
 from .utils import ce_loss, pu_loss
 
 
-class RobertaExtractor(BertPreTrainedModel):
-    config_class = RobertaConfig
-    base_model_prefix = "roberta"
-
+class BertGNNExtractor(BertPreTrainedModel):
     def __init__(self, config, **kwargs):
         super().__init__(config)
 
+        self.gnn_hidden_size = kwargs.get('gnn_hidden_size', 256)
+        self.num_gnn_heads = kwargs.get('num_gnn_heads', 2)
         self.num_labels = config.num_labels
         self.loss_type = kwargs.get('loss_type')
         self.prior_token = kwargs.get('prior_token')
         self.prior_phrase = kwargs.get('prior_phrase')
 
-        self.roberta = RobertaModel(config)
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.start_output_layer = nn.Sequential(
+        self.bert = BertModel(config)
+        self.pyramid_gnn = PyramidGNN(
+            config.hidden_size * 2,
+            self.gnn_hidden_size,
+            self.num_gnn_heads,
+            dropout=config.hidden_dropout_prob
+        )
+        self.dense = nn.Linear(self.gnn_hidden_size, self.gnn_hidden_size)
+        self.start_layer = nn.Sequential(
             self.dense,
             nn.ReLU(),
             nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(config.hidden_size, config.num_labels),
+            nn.Linear(self.gnn_hidden_size, config.num_labels),
         )
-        self.end_output_layer = nn.Sequential(
+        self.end_layer = nn.Sequential(
             self.dense,
             nn.ReLU(),
             nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(config.hidden_size, config.num_labels),
+            nn.Linear(self.gnn_hidden_size, config.num_labels),
         )
-        self.phrase_output_layer = nn.Sequential(
-            nn.Linear(config.hidden_size * 2, config.hidden_size),
+        self.phrase_layer = nn.Sequential(
+            nn.Linear(self.gnn_hidden_size, self.gnn_hidden_size),
             nn.ReLU(),
             nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(config.hidden_size, config.num_labels),
+            nn.Linear(self.gnn_hidden_size, config.num_labels),
         )
 
         self.init_weights()
@@ -59,28 +65,34 @@ class RobertaExtractor(BertPreTrainedModel):
         end_labels=None,
         phrase_labels=None,
     ):
-        outputs = self.roberta(
+        batch_size = input_ids.shape[0]
+        max_seq_length = input_ids.shape[1]
+
+        outputs = self.bert(
             input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
         )
         sequence_output = outputs[0]  # (batch_size, max_seq_length, hidden_size)
 
-        max_seq_length = sequence_output.shape[1]
-        # mask for real tokens
+        start_extend = sequence_output.unsqueeze(2).expand(-1, -1, max_seq_length, -1)
+        end_extend = sequence_output.unsqueeze(1).expand(-1, max_seq_length, -1, -1)
+        node_matrix = torch.cat([start_extend, end_extend], dim=-1)
+        node_matrix = self.pyramid_gnn(node_matrix)  # (batch_size, max_seq_length, max_seq_length, gnn_hidden_size)
+
+        diag_index = torch.arange(0, max_seq_length).to(self.device)
+        diag_index = diag_index.view(1, 1, -1, 1).repeat(batch_size, 1, 1, self.gnn_hidden_size)
+        sequence_output = node_matrix.gather(1, diag_index).squeeze(1)  # (batch_size, max_seq_length, gnn_hidden_size)
+
+        start_logits = self.start_layer(sequence_output)  # (batch_size, max_seq_length, 2)
+        end_logits = self.end_layer(sequence_output)  # (batch_size, max_seq_length, 2)
+        outputs = (attention_mask.unsqueeze(-1) * start_logits, attention_mask.unsqueeze(-1) * end_logits) + outputs
+
+        phrase_logits = self.phrase_layer(node_matrix)  # (batch_size, max_seq_length, max_seq_length, num_labels)
         phrase_mask = torch.logical_and(
             attention_mask.unsqueeze(-1).expand(-1, -1, max_seq_length),
             attention_mask.unsqueeze(-2).expand(-1, max_seq_length, -1)
-        ).triu()
-
-        start_logits = self.start_output_layer(sequence_output)  # (batch_size, max_seq_length, 2)
-        end_logits = self.end_output_layer(sequence_output)  # (batch_size, max_seq_length, 2)
-        outputs = (attention_mask.unsqueeze(-1) * start_logits, attention_mask.unsqueeze(-1) * end_logits) + outputs
-
-        start_extend = sequence_output.unsqueeze(2).expand(-1, -1, max_seq_length, -1)
-        end_extend = sequence_output.unsqueeze(1).expand(-1, max_seq_length, -1, -1)
-        phrase_matrix = torch.cat([start_extend, end_extend], dim=-1)
-        phrase_logits = self.phrase_output_layer(phrase_matrix)  # (batch_size, max_seq_length, max_seq_length, 2)
+        ).triu()  # mask for real tokens
         outputs = (phrase_mask.unsqueeze(-1) * phrase_logits,) + outputs
 
         if None not in [start_labels, end_labels, phrase_labels]:

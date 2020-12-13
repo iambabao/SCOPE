@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/11/24
+@Last modified date : 2020/12/13
 """
 
 import torch
@@ -20,10 +20,9 @@ class BertExtractor(BertPreTrainedModel):
         super().__init__(config)
 
         self.num_labels = config.num_labels
-        self.loss_candidates = kwargs.get('loss_candidates')
         self.loss_type = kwargs.get('loss_type')
-        self.prior = kwargs.get('prior')
-        self.frozen_layers = kwargs.get('frozen_layers', 0)
+        self.prior_token = kwargs.get('prior_token')
+        self.prior_phrase = kwargs.get('prior_phrase')
 
         self.bert = BertModel(config)
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
@@ -47,14 +46,6 @@ class BertExtractor(BertPreTrainedModel):
         )
 
         self.init_weights()
-
-        if self.frozen_layers >= 0:
-            no_gradient = ['bert.embeddings.']
-            for i in range(self.frozen_layers):
-                no_gradient.append('bert.encoder.layer.{}.'.format(i))
-            for n, p in self.named_parameters():
-                if any(nd in n for nd in no_gradient):
-                    p.requires_grad = False
 
     def forward(
         self,
@@ -91,7 +82,27 @@ class BertExtractor(BertPreTrainedModel):
 
         if None not in [start_labels, end_labels, phrase_labels]:
             phrase_labels = phrase_labels.reshape(-1, max_seq_length, max_seq_length)
-            if self.loss_candidates == 'masked':
+            if self.loss_type == 'ce':
+                start_loss = ce_loss(start_logits, start_labels, self.num_labels, attention_mask == 1)
+                end_loss = ce_loss(end_logits, end_labels, self.num_labels, attention_mask == 1)
+                phrase_loss = ce_loss(phrase_logits, phrase_labels, self.num_labels, phrase_mask)
+            elif self.loss_type == 'pu':
+                p_risk = pu_loss(start_logits, 1, attention_mask & (start_labels == 1))
+                u_risk = pu_loss(start_logits, 0, attention_mask & (start_labels == 0))
+                n_risk = u_risk - self.prior_token * pu_loss(start_logits, 0, attention_mask & (start_labels == 1))
+                if n_risk >= 0:
+                    start_loss = self.prior_token * p_risk + n_risk
+                else:
+                    start_loss = -n_risk
+
+                p_risk = pu_loss(end_logits, 1, attention_mask & (end_labels == 1))
+                u_risk = pu_loss(end_logits, 0, attention_mask & (end_labels == 0))
+                n_risk = u_risk - self.prior_token * pu_loss(end_logits, 0, attention_mask & (end_labels == 1))
+                if n_risk >= 0:
+                    end_loss = self.prior_token * p_risk + n_risk
+                else:
+                    end_loss = -n_risk
+
                 golden_mask = torch.logical_and(
                     start_labels.unsqueeze(-1).expand(-1, -1, max_seq_length),
                     end_labels.unsqueeze(-2).expand(-1, max_seq_length, -1)
@@ -101,38 +112,13 @@ class BertExtractor(BertPreTrainedModel):
                     (torch.argmax(end_logits, dim=-1) == 1).unsqueeze(-2).expand(-1, max_seq_length, -1)
                 )  # mask for predicted start and end tokens
                 phrase_mask &= (golden_mask | predicted_mask)  # maks for all positive tokens
-
-            if self.loss_type == 'ce':
-                start_loss = ce_loss(start_logits, start_labels, self.num_labels, attention_mask == 1)
-                end_loss = ce_loss(end_logits, end_labels, self.num_labels, attention_mask == 1)
-                phrase_loss = ce_loss(phrase_logits, phrase_labels, self.num_labels, phrase_mask)
-            elif self.loss_type == 'pu':
-                p_risk = pu_loss(start_logits, 1, attention_mask & (start_labels == 1))
-                u_risk = pu_loss(start_logits, 0, attention_mask & (start_labels == 0))
-                n_risk = u_risk - self.prior * pu_loss(start_logits, 0, attention_mask & (start_labels == 1))
-                if n_risk >= 0:
-                    start_loss = self.prior * p_risk + n_risk
-                else:
-                    start_loss = -n_risk
-                # start_loss = ce_loss(start_logits, start_labels, self.num_labels, attention_mask == 1)
-
-                p_risk = pu_loss(end_logits, 1, attention_mask & (end_labels == 1))
-                u_risk = pu_loss(end_logits, 0, attention_mask & (end_labels == 0))
-                n_risk = u_risk - self.prior * pu_loss(end_logits, 0, attention_mask & (end_labels == 1))
-                if n_risk >= 0:
-                    end_loss = self.prior * p_risk + n_risk
-                else:
-                    end_loss = -n_risk
-                # end_loss = ce_loss(end_logits, end_labels, self.num_labels, attention_mask == 1)
-
                 p_risk = pu_loss(phrase_logits, 1, phrase_mask & (phrase_labels == 1))
                 u_risk = pu_loss(phrase_logits, 0, phrase_mask & (phrase_labels == 0))
-                n_risk = u_risk - self.prior * pu_loss(phrase_logits, 0, phrase_mask & (phrase_labels == 1))
+                n_risk = u_risk - self.prior_phrase * pu_loss(phrase_logits, 0, phrase_mask & (phrase_labels == 1))
                 if n_risk >= 0:
-                    phrase_loss = self.prior * p_risk + n_risk
+                    phrase_loss = self.prior_phrase * p_risk + n_risk
                 else:
                     phrase_loss = -n_risk
-                # phrase_loss = ce_loss(phrase_logits, phrase_labels, self.num_labels, phrase_mask)
             else:
                 raise ValueError('{} is not supported for loss.'.format(self.loss_type))
 

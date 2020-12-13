@@ -8,7 +8,6 @@
 @Last modified date : 2020/11/11
 """
 
-import json
 from .generator import Generator
 from .reader import Reader
 

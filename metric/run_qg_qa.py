@@ -20,17 +20,23 @@ from src.utils import init_logger, save_json, read_json_lines
 logger = logging.getLogger(__name__)
 
 
-def read_data(filename):
+def read_data(filename, is_golden):
     data = []
     for line in tqdm(list(read_json_lines(filename)), desc='Reading data'):
-        for answer in line['predicted']:
-            data.append({'context': line['context'], 'answer': answer})
+        context = line['context']
+        if is_golden:
+            for qa in line['qas']:
+                data.append({'context': context, 'answer': (qa['answer'], qa['answer_start'], qa['answer_end'])})
+        else:
+            for answer in line['predicted']:
+                data.append({'context': context, 'answer': answer})
     return data
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint", required=True, type=str, help="Checkpoint to evaluate")
+    parser.add_argument("--input_file", required=True, type=str, help="The input file")
+    parser.add_argument("--is_golden", action="store_true", help="Whether to load spans from golden qa pairs")
     parser.add_argument("--beam_size", default=5, type=int, help="Number of questions to be generated")
     parser.add_argument(
         "--max_seq_length",
@@ -58,9 +64,12 @@ def main():
         device='cuda' if torch.cuda.is_available() and not args.no_cuda else 'cpu',
     )
 
-    data = read_data(os.path.join(args.checkpoint, 'test_outputs.json'))
+    logger.info('Running pipeline')
+    data = read_data(args.input_file, is_golden=True if args.is_golden else False)
     results = pipeline(data, args.beam_size, args.max_seq_length, args.batch_size)
-    save_json(results, os.path.join(args.checkpoint, 'test_qg-qa.json'))
+    prefix, filename = os.path.split(args.input_file)
+    filename, _ = os.path.splitext(filename)
+    save_json(results, os.path.join(prefix, '{}.qg-qa.json'.format(filename)))
 
 
 if __name__ == '__main__':
