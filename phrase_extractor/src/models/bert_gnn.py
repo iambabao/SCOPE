@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/12/13
+@Last modified date : 2020/12/26
 """
 
 import torch
@@ -28,45 +28,46 @@ class BertGNNExtractor(BertPreTrainedModel):
         self.prior_phrase = kwargs.get('prior_phrase')
 
         self.bert = BertModel(config)
-        self.pyramid_gnn = PyramidGNN(
-            config.hidden_size * 2,
-            self.gnn_hidden_size,
-            self.num_gnn_heads,
-            dropout=config.hidden_dropout_prob
-        )
-        self.dense = nn.Linear(self.gnn_hidden_size, self.gnn_hidden_size)
+        self.dense = nn.Linear(self.config.hidden_size, self.config.hidden_size)
         self.start_layer = nn.Sequential(
             self.dense,
             nn.ReLU(),
             nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(self.gnn_hidden_size, config.num_labels),
+            nn.Linear(self.config.hidden_size, config.num_labels),
         )
         self.end_layer = nn.Sequential(
             self.dense,
             nn.ReLU(),
             nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(self.gnn_hidden_size, config.num_labels),
+            nn.Linear(self.config.hidden_size, config.num_labels),
         )
-        self.phrase_layer = nn.Sequential(
-            nn.Linear(self.gnn_hidden_size, self.gnn_hidden_size),
-            nn.ReLU(),
-            nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(self.gnn_hidden_size, config.num_labels),
+        self.pyramid_gnn = PyramidGNN(
+            config.hidden_size * 2,
+            self.gnn_hidden_size,
+            self.num_gnn_heads,
+            config.num_labels,
+            dropout=config.hidden_dropout_prob,
         )
 
         self.init_weights()
 
     def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        start_labels=None,
-        end_labels=None,
-        phrase_labels=None,
+            self,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            src_index=None,
+            tgt_index=None,
+            start_labels=None,
+            end_labels=None,
+            phrase_labels=None,
     ):
-        batch_size = input_ids.shape[0]
         max_seq_length = input_ids.shape[1]
+        # mask for real tokens
+        phrase_mask = torch.logical_and(
+            attention_mask.unsqueeze(-1).expand(-1, -1, max_seq_length),
+            attention_mask.unsqueeze(-2).expand(-1, max_seq_length, -1)
+        ).triu()
 
         outputs = self.bert(
             input_ids,
@@ -75,24 +76,15 @@ class BertGNNExtractor(BertPreTrainedModel):
         )
         sequence_output = outputs[0]  # (batch_size, max_seq_length, hidden_size)
 
-        start_extend = sequence_output.unsqueeze(2).expand(-1, -1, max_seq_length, -1)
-        end_extend = sequence_output.unsqueeze(1).expand(-1, max_seq_length, -1, -1)
-        node_matrix = torch.cat([start_extend, end_extend], dim=-1)
-        node_matrix = self.pyramid_gnn(node_matrix)  # (batch_size, max_seq_length, max_seq_length, gnn_hidden_size)
-
-        diag_index = torch.arange(0, max_seq_length).to(self.device)
-        diag_index = diag_index.view(1, 1, -1, 1).repeat(batch_size, 1, 1, self.gnn_hidden_size)
-        sequence_output = node_matrix.gather(1, diag_index).squeeze(1)  # (batch_size, max_seq_length, gnn_hidden_size)
-
         start_logits = self.start_layer(sequence_output)  # (batch_size, max_seq_length, 2)
         end_logits = self.end_layer(sequence_output)  # (batch_size, max_seq_length, 2)
         outputs = (attention_mask.unsqueeze(-1) * start_logits, attention_mask.unsqueeze(-1) * end_logits) + outputs
 
-        phrase_logits = self.phrase_layer(node_matrix)  # (batch_size, max_seq_length, max_seq_length, num_labels)
-        phrase_mask = torch.logical_and(
-            attention_mask.unsqueeze(-1).expand(-1, -1, max_seq_length),
-            attention_mask.unsqueeze(-2).expand(-1, max_seq_length, -1)
-        ).triu()  # mask for real tokens
+        start_expanded = sequence_output.unsqueeze(2).expand(-1, -1, max_seq_length, -1)
+        end_expanded = sequence_output.unsqueeze(1).expand(-1, max_seq_length, -1, -1)
+        phrase_matrix = torch.cat([start_expanded, end_expanded], dim=-1)
+        # (batch_size, max_seq_length, max_seq_length, num_labels)
+        phrase_logits = self.pyramid_gnn(phrase_matrix, src_index, tgt_index)
         outputs = (phrase_mask.unsqueeze(-1) * phrase_logits,) + outputs
 
         if None not in [start_labels, end_labels, phrase_labels]:

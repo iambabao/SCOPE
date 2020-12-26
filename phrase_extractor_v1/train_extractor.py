@@ -32,7 +32,6 @@ except ImportError:
 
 MODEL_MAPPING = {
     'bert': BertExtractor,
-    'roberta': RobertaExtractor,
     'bert-gnn': BertGNNExtractor,
 }
 
@@ -112,6 +111,8 @@ def train(args, data_processor, model, tokenizer, role):
             inputs = {
                 "input_ids": batch[0].to(args.device),
                 "attention_mask": batch[1].to(args.device),
+                "token_spans": batch[3].to(args.device),
+                "num_tokens": batch[6].to(args.device),
                 "start_labels": batch[-3].to(args.device),
                 "end_labels": batch[-2].to(args.device),
                 "phrase_labels": batch[-1].to_dense().to(args.device),
@@ -120,8 +121,8 @@ def train(args, data_processor, model, tokenizer, role):
             if args.model_type in ["bert", "xlnet", "albert"]:
                 inputs["token_type_ids"] = batch[2].to(args.device)
             if "gnn" in args.model_type:
-                inputs["src_index"] = batch[3].to(args.device)
-                inputs["tgt_index"] = batch[4].to(args.device)
+                inputs["src_index"] = batch[4].to(args.device)
+                inputs["tgt_index"] = batch[5].to(args.device)
 
             outputs = model(**inputs)
             loss = outputs[0]
@@ -213,6 +214,8 @@ def evaluate(args, data_processor, model, tokenizer, role, prefix=""):
             inputs = {
                 "input_ids": batch[0].to(args.device),
                 "attention_mask": batch[1].to(args.device),
+                "token_spans": batch[3].to(args.device),
+                "num_tokens": batch[6].to(args.device),
                 "start_labels": batch[-3].to(args.device),
                 "end_labels": batch[-2].to(args.device),
                 "phrase_labels": batch[-1].to_dense().to(args.device),
@@ -221,20 +224,16 @@ def evaluate(args, data_processor, model, tokenizer, role, prefix=""):
             if args.model_type in ["bert", "xlnet", "albert"]:
                 inputs["token_type_ids"] = batch[2].to(args.device)
             if "gnn" in args.model_type:
-                inputs["src_index"] = batch[3].to(args.device)
-                inputs["tgt_index"] = batch[4].to(args.device)
+                inputs["src_index"] = batch[4].to(args.device)
+                inputs["tgt_index"] = batch[5].to(args.device)
 
             outputs = model(**inputs)
             phrase_logits, start_logits, end_logits = outputs[1], outputs[2], outputs[3]
 
-            offset_mapping = batch[5].numpy()
-            phrase_labels = batch[-1].to_dense().numpy()
             start_predicted = np.argmax(start_logits.detach().cpu().numpy(), axis=-1)
             end_predicted = np.argmax(end_logits.detach().cpu().numpy(), axis=-1)
             phrase_predicted = np.argmax(phrase_logits.detach().cpu().numpy(), axis=-1)
-            eval_outputs.extend(generate_outputs(
-                offset_mapping, phrase_labels, start_predicted, end_predicted, phrase_predicted
-            ))
+            eval_outputs.extend(generate_outputs(start_predicted, end_predicted, phrase_predicted))
     eval_outputs = refine_outputs(examples, eval_outputs)
     eval_outputs_file = os.path.join(output_dir, "{}_outputs.json".format(role))
     save_json_lines(eval_outputs, eval_outputs_file)

@@ -5,7 +5,13 @@
 /**/checkpoints/
 /**/temp/
 temp.*
+*.temp.*
 temp_*
+*_temp_*
+backup.*
+*.backup.*
+backup_*
+*_backup_*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

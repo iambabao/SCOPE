@@ -9,5 +9,4 @@
 """
 
 from .bert import BertExtractor
-from .roberta import RobertaExtractor
 from .bert_gnn import BertGNNExtractor

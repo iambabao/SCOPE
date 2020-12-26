@@ -22,15 +22,14 @@ def generate_batch_data(memory, src_index, tgt_index):
     return batch_data.x.to(memory.device), batch_data.edge_index.to(memory.device)
 
 
-class PyramidGNN(nn.Module):
-    def __init__(self, node_hidden_size, gnn_hidden_size, num_heads, num_labels, dropout=0.1):
-        super(PyramidGNN, self).__init__()
+class DependencyGNN(nn.Module):
+    def __init__(self, node_hidden_size, gnn_hidden_size, num_heads, dropout=0.1):
+        super(DependencyGNN, self).__init__()
 
         self.activation = nn.ELU()
         self.dropout = nn.Dropout(dropout)
         self.gnn1 = GATConv(node_hidden_size, gnn_hidden_size, num_heads, dropout=dropout)
         self.gnn2 = GATConv(gnn_hidden_size * num_heads, gnn_hidden_size, num_heads, dropout=dropout)
-        self.gnn3 = GATConv(gnn_hidden_size * num_heads, num_labels, num_heads, concat=False, dropout=dropout)
 
     def forward(self, node_embeddings, src_index, tgt_index):
         """
@@ -41,7 +40,7 @@ class PyramidGNN(nn.Module):
             tgt_index: (batch_size, num_edges)
 
         Returns:
-            output_embeddings: (batch_size, seq_length, seq_length, num_labels)
+            output_embeddings: (batch_size, seq_length, seq_length, gnn_hidden_size * num_heads)
         """
 
         batch_size = node_embeddings.shape[0]
@@ -52,8 +51,6 @@ class PyramidGNN(nn.Module):
         memory = self.gnn1(memory, edge_index)
         memory = self.dropout(self.activation(memory))
         memory = self.gnn2(memory, edge_index)
-        memory = self.dropout(self.activation(memory))
-        memory = self.gnn3(memory, edge_index)
         node_embeddings = memory.view([batch_size, seq_length, seq_length, -1])
 
         return node_embeddings
