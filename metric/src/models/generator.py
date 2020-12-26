@@ -5,11 +5,11 @@
 @Date               : 2020/10/13
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/11/11
+@Last modified date : 2020/12/26
 """
 
 from tqdm import tqdm
-from transformers import AutoTokenizer, AutoModelWithLMHead
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 
 class Generator:
@@ -39,7 +39,7 @@ class Generator:
             model_name_or_path,
             cache_dir=cache_dir if cache_dir else None,
         )
-        self.model = AutoModelWithLMHead.from_pretrained(
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(
             model_name_or_path,
             cache_dir=cache_dir if cache_dir else None,
         )
@@ -58,6 +58,7 @@ class Generator:
                 context = entry['context']
                 answer, answer_start, answer_end = entry['answer']
                 context = context[:answer_start] + '<hl> ' + answer + ' <hl>' + context[answer_end:]
+                context = 'generate question: {} </s>'.format(context)
                 batch_text.append(context)
             inputs = self.tokenizer.batch_encode_plus(
                 batch_text,
