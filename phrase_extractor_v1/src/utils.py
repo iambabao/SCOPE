@@ -5,7 +5,7 @@
 @Date               : 2020/1/1
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/11/26
+@Last modified date : 2020/11/29
 """
 
 import json
@@ -180,11 +180,13 @@ def load_glove_embedding(data_file, word_list):
 def generate_outputs(start_predicted, end_predicted, phrase_predicted):
     outputs = []
     for start_flags, end_flags, phrase_flags in zip(start_predicted, end_predicted, phrase_predicted):
-        item = {'predicted': []}
-        for i, is_start in enumerate(start_flags):
-            if is_start != 1: continue
-            for j, is_end in enumerate(end_flags):
-                if is_end != 1: continue
+        item = {
+            'predicted_start': [i for i, is_start in enumerate(start_flags) if is_start],
+            'predicted_end': [i for i, is_end in enumerate(end_flags) if is_end],
+            'predicted': []
+        }
+        for i in item['predicted_start']:
+            for j in item['predicted_end']:
                 if phrase_flags[i][j] == 1:
                     item['predicted'].append((i, j))
         outputs.append(item)
@@ -196,15 +198,25 @@ def refine_outputs(examples, outputs):
     for example, entry in zip(examples, outputs):
         context = example.context
         token_spans = example.token_spans
+        golden_start = [start for phrase, start, end in example.phrase_spans]
+        golden_end = [end for phrase, start, end in example.phrase_spans]
         golden = [
-            (context[token_spans[start][0]:token_spans[end][1]], token_spans[start][0], token_spans[end][1])
-            for _, start, end in example.phrase_spans
+            (context[token_spans[start][1]:token_spans[end][2]], token_spans[start][1], token_spans[end][2])
+            for phrase, start, end in example.phrase_spans
         ]
         predicted = [
-            (context[token_spans[start][0]:token_spans[end][1]], token_spans[start][0], token_spans[end][1])
+            (context[token_spans[start][1]:token_spans[end][2]], token_spans[start][1], token_spans[end][2])
             for start, end in entry['predicted']
         ]
-        refined_outputs.append({'context': context, 'golden': golden, 'predicted': predicted})
+        refined_outputs.append({
+            'context': context,
+            'golden': golden,
+            'predicted': predicted,
+            'golden_start': golden_start,
+            'predicted_start': entry['predicted_start'],
+            'golden_end': golden_end,
+            'predicted_end': entry['predicted_end'],
+        })
     return refined_outputs
 
 

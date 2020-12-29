@@ -5,7 +5,7 @@
 @Date               : 2020/12/9
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/12/26
+@Last modified date : 2020/12/29
 """
 
 import torch
@@ -35,22 +35,21 @@ class DependencyGNN(nn.Module):
         """
 
         Args:
-            node_embeddings: (batch_size, seq_length, seq_length, node_hidden_size)
+            node_embeddings: (batch_size, num_nodes, node_hidden_size)
             src_index: (batch_size, num_edges)
             tgt_index: (batch_size, num_edges)
 
         Returns:
-            output_embeddings: (batch_size, seq_length, seq_length, gnn_hidden_size * num_heads)
+            output_embeddings: (batch_size, num_nodes, gnn_hidden_size * num_heads)
         """
 
         batch_size = node_embeddings.shape[0]
-        seq_length = node_embeddings.shape[1]
+        num_nodes = node_embeddings.shape[1]
 
-        memory = node_embeddings.view([batch_size, seq_length * seq_length, -1])
-        memory, edge_index = generate_batch_data(memory, src_index, tgt_index)
+        memory, edge_index = generate_batch_data(node_embeddings, src_index, tgt_index)
         memory = self.gnn1(memory, edge_index)
         memory = self.dropout(self.activation(memory))
         memory = self.gnn2(memory, edge_index)
-        node_embeddings = memory.view([batch_size, seq_length, seq_length, -1])
+        node_embeddings = memory.view([batch_size, num_nodes, -1])
 
         return node_embeddings

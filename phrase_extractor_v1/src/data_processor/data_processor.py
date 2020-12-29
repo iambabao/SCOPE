@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/12/26
+@Last modified date : 2020/12/29
 """
 
 import os
@@ -93,13 +93,20 @@ def convert_examples_to_features(examples, tokenizer, max_length=512):
             start_index, end_index = -1, -1
             for i, (start, end) in enumerate(encoded["offset_mapping"]):
                 if start_index == -1 and start <= token_start < end: start_index = i
-                if end_index == -1 and start < token_end <= end: end_index = i
+                if end_index == -1 and start < token_end <= end: end_index = i + 1
             if start_index == -1 or end_index == -1: start_index, end_index = 0, 1
             token_spans.append((start_index, end_index))
         token_spans = token_spans + [(0, 1)] * (max_length - len(token_spans))
+        src_index, tgt_index = [], []
+        for src, tgt in zip(example.src_index, example.tgt_index):
+            if src >= max_length or tgt >= max_length: continue
+            src_index.append(src)
+            tgt_index.append(tgt)
+            # src_index.append(tgt)
+            # tgt_index.append(src)
         encoded["token_spans"] = token_spans
-        encoded["src_index"] = example.src_index
-        encoded["tgt_index"] = example.tgt_index
+        encoded["src_index"] = src_index
+        encoded["tgt_index"] = tgt_index
         encoded["num_tokens"] = min(len(example.token_spans), max_length)
 
         # initialize labels
@@ -107,6 +114,7 @@ def convert_examples_to_features(examples, tokenizer, max_length=512):
         end_labels = [0] * max_length
         phrase_labels = [[0] * max_length for _ in range(max_length)]
         for _, phrase_start, phrase_end in example.phrase_spans:
+            if phrase_start >= max_length or phrase_end >= max_length: continue
             start_labels[phrase_start] = 1
             end_labels[phrase_end] = 1
             phrase_labels[phrase_start][phrase_end] = 1
@@ -114,15 +122,15 @@ def convert_examples_to_features(examples, tokenizer, max_length=512):
         encoded["end_labels"] = end_labels
         encoded["phrase_labels"] = coo_matrix(phrase_labels).reshape(1, max_length * max_length)
 
-        del encoded["offsets_mapping"]
+        del encoded["offset_mapping"]
         features.append(InputFeatures(**encoded))
 
         if ex_index < 5:
             logger.info("*** Example ***")
             logger.info("guid: {}".format(encoded["guid"]))
             logger.info("input_ids: {}".format(encoded["input_ids"]))
-            logger.info("tokens: {}".format(" ".join([v[0] for v in example.token_spans])))
-            logger.info("phrases: {}".format(" ".join([v[0] for v in example.phrase_spans])))
+            logger.info("tokens: {}".format([v[0] for v in example.token_spans]))
+            logger.info("phrases: {}".format([v[0] for v in example.phrase_spans]))
 
     return features
 
@@ -154,7 +162,7 @@ class DataProcessor:
         else:
             examples = []
             for line in tqdm(
-                list(read_json_lines(os.path.join(self.data_dir, "data_{}.json".format(role)))),
+                list(read_json_lines(os.path.join(self.data_dir, "deptree_{}.json".format(role)))),
                 desc="Loading Examples"
             ):
                 sample = {'guid': len(examples)}

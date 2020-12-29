@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/12/26
+@Last modified date : 2020/12/29
 """
 
 import torch
@@ -97,18 +97,14 @@ class BertGNNExtractor(BertPreTrainedModel):
                 p_risk = pu_loss(start_logits, 1, attention_mask & (start_labels == 1))
                 u_risk = pu_loss(start_logits, 0, attention_mask & (start_labels == 0))
                 n_risk = u_risk - self.prior_token * pu_loss(start_logits, 0, attention_mask & (start_labels == 1))
-                if n_risk >= 0:
-                    start_loss = self.prior_token * p_risk + n_risk
-                else:
-                    start_loss = -n_risk
+                if n_risk >= 0: start_loss = self.prior_token * p_risk + n_risk
+                else: start_loss = -n_risk
 
                 p_risk = pu_loss(end_logits, 1, attention_mask & (end_labels == 1))
                 u_risk = pu_loss(end_logits, 0, attention_mask & (end_labels == 0))
                 n_risk = u_risk - self.prior_token * pu_loss(end_logits, 0, attention_mask & (end_labels == 1))
-                if n_risk >= 0:
-                    end_loss = self.prior_token * p_risk + n_risk
-                else:
-                    end_loss = -n_risk
+                if n_risk >= 0: end_loss = self.prior_token * p_risk + n_risk
+                else: end_loss = -n_risk
 
                 golden_mask = torch.logical_and(
                     start_labels.unsqueeze(-1).expand(-1, -1, max_seq_length),
@@ -122,10 +118,8 @@ class BertGNNExtractor(BertPreTrainedModel):
                 p_risk = pu_loss(phrase_logits, 1, phrase_mask & (phrase_labels == 1))
                 u_risk = pu_loss(phrase_logits, 0, phrase_mask & (phrase_labels == 0))
                 n_risk = u_risk - self.prior_phrase * pu_loss(phrase_logits, 0, phrase_mask & (phrase_labels == 1))
-                if n_risk >= 0:
-                    phrase_loss = self.prior_phrase * p_risk + n_risk
-                else:
-                    phrase_loss = -n_risk
+                if n_risk >= 0: phrase_loss = self.prior_phrase * p_risk + n_risk
+                else: phrase_loss = -n_risk
             else:
                 raise ValueError('{} is not supported for loss.'.format(self.loss_type))
 

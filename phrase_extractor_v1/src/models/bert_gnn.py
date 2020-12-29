@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/12/26
+@Last modified date : 2020/12/29
 """
 
 import torch
@@ -70,9 +70,9 @@ class BertGNNExtractor(BertPreTrainedModel):
             phrase_labels=None,
     ):
         batch_size = input_ids.shape[0]
-        max_num_tokens = num_tokens.max()
+        max_num_tokens = token_spans.shape[1]
         # mask for real tokens with shape (batch_size, max_num_tokens)
-        token_mask = torch.arange(max_num_tokens).expand(len(num_tokens), max_num_tokens) < num_tokens.unsqueeze(1)
+        token_mask = torch.arange(max_num_tokens).expand(len(num_tokens), max_num_tokens).to(self.device) < num_tokens.unsqueeze(1)
         # mask for valid phrases with shape (batch_size, max_num_tokens, max_num_tokens)
         phrase_mask = torch.logical_and(
             token_mask.unsqueeze(-1).expand(-1, -1, max_num_tokens),
@@ -91,7 +91,8 @@ class BertGNNExtractor(BertPreTrainedModel):
             token_embeddings.append(
                 torch.stack([torch.mean(sequence_output[i][start:end], dim=0) for start, end in token_spans[i]], dim=0)
             )
-        token_embeddings = torch.stack(token_embeddings, dim=0)
+        token_embeddings = torch.stack(token_embeddings, dim=0)  # (batch_size, max_num_tokens, hidden_size)
+
         # (batch_size, max_num_tokens, gnn_hidden_size * num_gnn_heads)
         token_embeddings = self.dependency_gnn(token_embeddings, src_index, tgt_index)
 

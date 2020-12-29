@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/12/13
+@Last modified date : 2020/12/29
 """
 
 import argparse
@@ -157,7 +157,7 @@ def train(args, data_processor, model, tokenizer, role):
                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     # Only evaluate when single GPU otherwise metrics may not average well
                     if args.local_rank == -1 and args.evaluate_during_training:
-                        results = evaluate(args, data_processor, model, tokenizer, role="eval", prefix=str(global_step))
+                        results = evaluate(args, data_processor, model, tokenizer, role="dev", prefix=str(global_step))
                         for key, value in results.items():
                             tb_writer.add_scalar("eval_{}".format(key), value, global_step)
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)

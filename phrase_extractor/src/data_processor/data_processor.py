@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/11/10
+@Last modified date : 2020/12/29
 """
 
 import os
@@ -123,18 +123,15 @@ def convert_examples_to_features(examples, tokenizer, max_length=512):
         start_labels = [0] * max_length
         end_labels = [0] * max_length
         phrase_labels = [[0] * max_length for _ in range(max_length)]
-        for char_start, char_end in example.phrase_spans:
-            token_start, token_end = -1, -1
+        for _, phrase_start, phrase_end in example.phrase_spans:
+            start_index, end_index = -1, -1
             for i, (start, end) in enumerate(encoded["offset_mapping"]):
-                if start <= char_start < end:
-                    token_start = i
-                if start < char_end <= end:
-                    token_end = i
-            if token_start == -1 or token_end == -1 or token_start > token_end:
-                continue
-            start_labels[token_start] = 1
-            end_labels[token_end] = 1
-            phrase_labels[token_start][token_end] = 1
+                if start <= phrase_start < end: start_index = i
+                if start < phrase_end <= end: end_index = i
+            if start_index == -1 or end_index == -1 or start_index > end_index: continue
+            start_labels[start_index] = 1
+            end_labels[end_index] = 1
+            phrase_labels[start_index][end_index] = 1
         encoded["start_labels"] = start_labels
         encoded["end_labels"] = end_labels
         encoded["phrase_labels"] = coo_matrix(phrase_labels).reshape(1, max_length * max_length)
@@ -144,10 +141,11 @@ def convert_examples_to_features(examples, tokenizer, max_length=512):
         if ex_index < 5:
             logger.info("*** Example ***")
             logger.info("guid: {}".format(encoded["guid"]))
-            logger.info("tokens: {}".format(tokenizer.decode(encoded["input_ids"], skip_special_tokens=True)))
             logger.info("input_ids: {}".format(encoded["input_ids"]))
             logger.info("start_labels: {}".format(encoded["start_labels"]))
             logger.info("end_labels: {}".format(encoded["end_labels"]))
+            logger.info("tokens: {}".format(tokenizer.decode(encoded["input_ids"], skip_special_tokens=True)))
+            logger.info("phrases: {}".format([v[0] for v in example.phrase_spans]))
 
     return features
 
@@ -240,11 +238,6 @@ class DataProcessor:
         context = line["context"]
         qas = line["qas"]
 
-        phrase_spans = []
-        for qa in qas:
-            phrase_spans.append((qa["answer_start"], qa["answer_end"]))
+        phrase_spans = [(qa['answer'], qa["answer_start"], qa["answer_end"]) for qa in qas]
 
-        return {
-            "context": context,
-            "phrase_spans": phrase_spans,
-        }
+        return {"context": context, "phrase_spans": phrase_spans}

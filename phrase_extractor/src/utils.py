@@ -5,7 +5,7 @@
 @Date               : 2020/1/1
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/11/24
+@Last modified date : 2020/12/29
 """
 
 import json
@@ -177,25 +177,20 @@ def load_glove_embedding(data_file, word_list):
 
 
 # ====================
-def generate_outputs(offset_mappings, phrase_labels, start_predicted, end_predicted, phrase_predicted):
+def generate_outputs(offset_mappings, start_predicted, end_predicted, phrase_predicted):
     outputs = []
-    for mapping, labels, start_flags, end_flags, phrase_flags in zip(
-        offset_mappings, phrase_labels, start_predicted, end_predicted, phrase_predicted
+    for mapping, start_flags, end_flags, phrase_flags in zip(
+        offset_mappings, start_predicted, end_predicted, phrase_predicted
     ):
-        item = {'golden': [], 'predicted': []}
-        labels = labels.reshape(phrase_flags.shape)
-        for i in range(labels.shape[0]):
-            for j in range(i, labels.shape[1]):
-                if labels[i][j] == 1:
-                    start, end = mapping[i][0], mapping[j][1]
-                    item['golden'].append((int(start), int(end)))
-        for i, is_start in enumerate(start_flags):
-            if is_start != 1: continue
-            for j, is_end in enumerate(end_flags):
-                if is_end != 1: continue
+        item = {
+            'predicted_start': [i for i, is_start in enumerate(start_flags) if is_start],
+            'predicted_end': [i for i, is_end in enumerate(end_flags) if is_end],
+            'predicted': []
+        }
+        for i in item['predicted_start']:
+            for j in item['predicted_end']:
                 if phrase_flags[i][j] == 1:
-                    start, end = mapping[i][0], mapping[j][1]
-                    item['predicted'].append((int(start), int(end)))
+                    item['predicted'].append((int(mapping[i][0]), int(mapping[j][1])))
         outputs.append(item)
     return outputs
 
@@ -204,9 +199,19 @@ def refine_outputs(examples, outputs):
     refined_outputs = []
     for example, entry in zip(examples, outputs):
         context = example.context
-        golden = [(context[start:end], start, end) for start, end in entry['golden']]
+        golden_start = [start for phrase, start, end in example.phrase_spans]
+        golden_end = [end for phrase, start, end in example.phrase_spans]
+        golden = example.phrase_spans
         predicted = [(context[start:end], start, end) for start, end in entry['predicted']]
-        refined_outputs.append({'context': context, 'golden': golden, 'predicted': predicted})
+        refined_outputs.append({
+            'context': context,
+            'golden': golden,
+            'predicted': predicted,
+            'golden_start': golden_start,
+            'predicted_start': entry['predicted_start'],
+            'golden_end': golden_end,
+            'predicted_end': entry['predicted_end'],
+        })
     return refined_outputs
 
 
