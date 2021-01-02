@@ -112,7 +112,8 @@ def train(args, data_processor, model, tokenizer, role):
                 "input_ids": batch[0].to(args.device),
                 "attention_mask": batch[1].to(args.device),
                 "token_mapping": batch[3].to(args.device),
-                "num_tokens": batch[6].to(args.device),
+                "token_type": batch[4].to(args.device),
+                "num_tokens": batch[7].to(args.device),
                 "start_labels": batch[-3].to(args.device),
                 "end_labels": batch[-2].to(args.device),
                 "phrase_labels": batch[-1].to_dense().to(args.device),
@@ -121,8 +122,8 @@ def train(args, data_processor, model, tokenizer, role):
             if args.model_type in ["bert", "xlnet", "albert"]:
                 inputs["token_type_ids"] = batch[2].to(args.device)
             if "gnn" in args.model_type:
-                inputs["src_index"] = batch[4].to(args.device)
-                inputs["tgt_index"] = batch[5].to(args.device)
+                inputs["src_index"] = batch[5].to(args.device)
+                inputs["tgt_index"] = batch[6].to(args.device)
 
             outputs = model(**inputs)
             loss = outputs[0]
@@ -215,7 +216,8 @@ def evaluate(args, data_processor, model, tokenizer, role, prefix=""):
                 "input_ids": batch[0].to(args.device),
                 "attention_mask": batch[1].to(args.device),
                 "token_mapping": batch[3].to(args.device),
-                "num_tokens": batch[6].to(args.device),
+                "token_type": batch[4].to(args.device),
+                "num_tokens": batch[7].to(args.device),
                 "start_labels": batch[-3].to(args.device),
                 "end_labels": batch[-2].to(args.device),
                 "phrase_labels": batch[-1].to_dense().to(args.device),
@@ -224,8 +226,8 @@ def evaluate(args, data_processor, model, tokenizer, role, prefix=""):
             if args.model_type in ["bert", "xlnet", "albert"]:
                 inputs["token_type_ids"] = batch[2].to(args.device)
             if "gnn" in args.model_type:
-                inputs["src_index"] = batch[4].to(args.device)
-                inputs["tgt_index"] = batch[5].to(args.device)
+                inputs["src_index"] = batch[5].to(args.device)
+                inputs["tgt_index"] = batch[6].to(args.device)
 
             outputs = model(**inputs)
             phrase_logits, start_logits, end_logits = outputs[1], outputs[2], outputs[3]
@@ -267,6 +269,9 @@ def main():
         help="The maximum total input sequence length after WordPiece tokenization. Sequences "
         "longer than this will be truncated, and sequences shorter than this will be padded.",
     )
+    parser.add_argument("--max_num_tokens", default=128, type=int, help="The maximum number of tokens in graph")
+    parser.add_argument("--max_num_types", required=True, type=int, help="The maximum number of pos tag types")
+    parser.add_argument("--feature_size", default=128, type=int, help="The hidden size of feature")
     parser.add_argument(
         "--do_lower_case", action="store_true", help="Set this flag if you are using an uncased model."
     )
@@ -421,6 +426,8 @@ def main():
         args.model_type,
         args.model_name_or_path,
         args.max_seq_length,
+        args.max_num_tokens,
+        args.max_num_types,
         data_dir=args.data_dir,
         overwrite_cache=args.overwrite_cache,
     )
@@ -440,6 +447,8 @@ def main():
         from_tf=bool(".ckpt" in args.model_name_or_path),
         config=config,
         cache_dir=args.cache_dir if args.cache_dir else None,
+        max_num_types=args.max_num_types,
+        feature_size=args.feature_size,
         loss_type=args.loss_type,
         prior_token=args.prior_token,
         prior_phrase=args.prior_phrase,
@@ -498,6 +507,8 @@ def main():
             # Reload the model
             model = model_class.from_pretrained(
                 checkpoint,
+                max_num_types=args.max_num_types,
+                feature_size=args.feature_size,
                 loss_type=args.loss_type,
                 prior_token=args.prior_token,
                 prior_phrase=args.prior_phrase,

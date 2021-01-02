@@ -52,14 +52,14 @@ class BertExtractor(BertPreTrainedModel):
             input_ids=None,
             attention_mask=None,
             token_type_ids=None,
-            token_spans=None,
+            token_mapping=None,
             num_tokens=None,
             start_labels=None,
             end_labels=None,
             phrase_labels=None,
     ):
         batch_size = input_ids.shape[0]
-        max_num_tokens = token_spans.shape[1]
+        max_num_tokens = input_ids.shape[1]
         # mask for real tokens with shape (batch_size, max_num_tokens)
         token_mask = torch.arange(max_num_tokens).expand(len(num_tokens), max_num_tokens).to(self.device) < num_tokens.unsqueeze(1)
         # mask for valid phrases with shape (batch_size, max_num_tokens, max_num_tokens)
@@ -75,20 +75,24 @@ class BertExtractor(BertPreTrainedModel):
         )
         sequence_output = outputs[0]  # (batch_size, max_seq_length, hidden_size)
 
-        token_embeddings = []
-        for i in range(batch_size):
-            token_embeddings.append(
-                torch.stack([torch.mean(sequence_output[i][start:end], dim=0) for start, end in token_spans[i]], dim=0)
-            )
-        token_embeddings = torch.stack(token_embeddings, dim=0)  # (batch_size, max_num_tokens, hidden_size)
+        # reconstruct sequence_output to token_embeddings with shape (batch_size, max_num_tokens, hidden_size)
+        expanded_token_mapping = token_mapping.unsqueeze(-1).repeat(1, 1, self.config.hidden_size)
+        zeros = torch.zeros([batch_size, max_num_tokens, self.config.hidden_size], dtype=torch.float).to(self.device)
+        token_embeddings = torch.scatter_add(zeros, 1, expanded_token_mapping, sequence_output)
+
+        # mean pooling over token_embeddings
+        zeros = torch.zeros([batch_size, max_num_tokens], dtype=torch.long).to(self.device)
+        token_counter = torch.scatter_add(zeros, 1, token_mapping, torch.ones_like(token_mapping))
+        token_counter = torch.max(token_counter, torch.ones_like(token_counter))
+        token_embeddings = token_embeddings / token_counter.unsqueeze(-1)
 
         start_logits = self.start_layer(token_embeddings)  # (batch_size, max_num_tokens, 2)
         end_logits = self.end_layer(token_embeddings)  # (batch_size, max_num_tokens, 2)
         outputs = (token_mask.unsqueeze(-1) * start_logits, token_mask.unsqueeze(-1) * end_logits) + outputs
 
-        start_extended = token_embeddings.unsqueeze(2).expand(-1, -1, max_num_tokens, -1)
-        end_extended = token_embeddings.unsqueeze(1).expand(-1, max_num_tokens, -1, -1)
-        phrase_matrix = torch.cat([start_extended, end_extended], dim=-1)
+        start_expanded = token_embeddings.unsqueeze(2).expand(-1, -1, max_num_tokens, -1)
+        end_expanded = token_embeddings.unsqueeze(1).expand(-1, max_num_tokens, -1, -1)
+        phrase_matrix = torch.cat([start_expanded, end_expanded], dim=-1)
         phrase_logits = self.phrase_layer(phrase_matrix)  # (batch_size, max_num_tokens, max_num_tokens, 2)
         outputs = (phrase_mask.unsqueeze(-1) * phrase_logits,) + outputs
 

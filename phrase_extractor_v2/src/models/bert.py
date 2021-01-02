@@ -5,49 +5,38 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/12/30
+@Last modified date : 2020/12/29
 """
 
 import torch
 import torch.nn as nn
 from transformers import BertModel, BertPreTrainedModel
 
-from .dependency_gnn import DependencyGNN
 from .utils import ce_loss, pu_loss
 
 
-class BertGNNExtractor(BertPreTrainedModel):
+class BertExtractor(BertPreTrainedModel):
     def __init__(self, config, **kwargs):
         super().__init__(config)
 
-        self.gnn_hidden_size = kwargs.get('gnn_hidden_size', config.hidden_size)
-        self.num_gnn_heads = kwargs.get('num_gnn_heads', 2)
         self.num_labels = config.num_labels
+        self.max_num_types = kwargs.get('max_num_types')
+        self.feature_size = kwargs.get('feature_size')
         self.loss_type = kwargs.get('loss_type')
         self.prior_token = kwargs.get('prior_token')
         self.prior_phrase = kwargs.get('prior_phrase')
 
         self.bert = BertModel(config)
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.start_layer = nn.Sequential(
-            self.dense,
+        self.type_embedding = nn.Embedding(self.max_num_types + 1, self.feature_size)
+        self.dense = nn.Linear(config.hidden_size + self.feature_size, config.hidden_size)
+        self.start_layer = nn.Linear(config.hidden_size, config.num_labels)
+        self.end_layer = nn.Linear(config.hidden_size, config.num_labels)
+        self.phrase_layer = nn.Sequential(
+            nn.Linear(config.hidden_size * 2, config.hidden_size),
             nn.ReLU(),
             nn.Dropout(config.hidden_dropout_prob),
             nn.Linear(config.hidden_size, config.num_labels),
         )
-        self.end_layer = nn.Sequential(
-            self.dense,
-            nn.ReLU(),
-            nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(config.hidden_size, config.num_labels),
-        )
-        self.dependency_gnn = DependencyGNN(
-            config.hidden_size,
-            self.gnn_hidden_size,
-            self.num_gnn_heads,
-            dropout=config.hidden_dropout_prob,
-        )
-        self.phrase_layer = nn.Linear(2 * self.gnn_hidden_size, config.num_labels)
 
         self.init_weights()
 
@@ -57,15 +46,14 @@ class BertGNNExtractor(BertPreTrainedModel):
             attention_mask=None,
             token_type_ids=None,
             token_mapping=None,
-            src_index=None,
-            tgt_index=None,
+            token_type=None,
             num_tokens=None,
             start_labels=None,
             end_labels=None,
             phrase_labels=None,
     ):
         batch_size = input_ids.shape[0]
-        max_num_tokens = input_ids.shape[1]
+        max_num_tokens = token_type.shape[1]
         # mask for real tokens with shape (batch_size, max_num_tokens)
         token_mask = torch.arange(max_num_tokens).expand(len(num_tokens), max_num_tokens).to(self.device) < num_tokens.unsqueeze(1)
         # mask for valid phrases with shape (batch_size, max_num_tokens, max_num_tokens)
@@ -92,11 +80,12 @@ class BertGNNExtractor(BertPreTrainedModel):
         token_counter = torch.max(token_counter, torch.ones_like(token_counter))
         token_embeddings = token_embeddings / token_counter.unsqueeze(-1)
 
+        type_em = self.type_embedding(token_type)
+        token_embeddings = self.dense(torch.cat([token_embeddings, type_em], dim=-1))
+
         start_logits = self.start_layer(token_embeddings)  # (batch_size, max_num_tokens, 2)
         end_logits = self.end_layer(token_embeddings)  # (batch_size, max_num_tokens, 2)
         outputs = (token_mask.unsqueeze(-1) * start_logits, token_mask.unsqueeze(-1) * end_logits) + outputs
-
-        token_embeddings = self.dependency_gnn(token_embeddings, src_index, tgt_index)
 
         start_expanded = token_embeddings.unsqueeze(2).expand(-1, -1, max_num_tokens, -1)
         end_expanded = token_embeddings.unsqueeze(1).expand(-1, max_num_tokens, -1, -1)

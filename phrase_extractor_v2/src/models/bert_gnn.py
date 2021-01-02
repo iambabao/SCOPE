@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/12/30
+@Last modified date : 2020/12/29
 """
 
 import torch
@@ -20,27 +20,20 @@ class BertGNNExtractor(BertPreTrainedModel):
     def __init__(self, config, **kwargs):
         super().__init__(config)
 
+        self.num_labels = config.num_labels
+        self.max_num_types = kwargs.get('max_num_types')
+        self.feature_size = kwargs.get('feature_size')
         self.gnn_hidden_size = kwargs.get('gnn_hidden_size', config.hidden_size)
         self.num_gnn_heads = kwargs.get('num_gnn_heads', 2)
-        self.num_labels = config.num_labels
         self.loss_type = kwargs.get('loss_type')
         self.prior_token = kwargs.get('prior_token')
         self.prior_phrase = kwargs.get('prior_phrase')
 
         self.bert = BertModel(config)
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.start_layer = nn.Sequential(
-            self.dense,
-            nn.ReLU(),
-            nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(config.hidden_size, config.num_labels),
-        )
-        self.end_layer = nn.Sequential(
-            self.dense,
-            nn.ReLU(),
-            nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(config.hidden_size, config.num_labels),
-        )
+        self.type_embedding = nn.Embedding(self.max_num_types + 1, self.feature_size)
+        self.dense = nn.Linear(config.hidden_size + self.feature_size, config.hidden_size)
+        self.start_layer = nn.Linear(config.hidden_size, config.num_labels)
+        self.end_layer = nn.Linear(config.hidden_size, config.num_labels)
         self.dependency_gnn = DependencyGNN(
             config.hidden_size,
             self.gnn_hidden_size,
@@ -57,6 +50,7 @@ class BertGNNExtractor(BertPreTrainedModel):
             attention_mask=None,
             token_type_ids=None,
             token_mapping=None,
+            token_type=None,
             src_index=None,
             tgt_index=None,
             num_tokens=None,
@@ -91,6 +85,9 @@ class BertGNNExtractor(BertPreTrainedModel):
         token_counter = torch.scatter_add(zeros, 1, token_mapping, torch.ones_like(token_mapping))
         token_counter = torch.max(token_counter, torch.ones_like(token_counter))
         token_embeddings = token_embeddings / token_counter.unsqueeze(-1)
+
+        type_em = self.type_embedding(token_type)
+        token_embeddings = self.dense(torch.cat([token_embeddings, type_em], dim=-1))
 
         start_logits = self.start_layer(token_embeddings)  # (batch_size, max_num_tokens, 2)
         end_logits = self.end_layer(token_embeddings)  # (batch_size, max_num_tokens, 2)
