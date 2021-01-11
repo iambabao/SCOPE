@@ -5,7 +5,7 @@
 @Date               : 2020/12/9
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/12/29
+@Last modified date : 2021/1/4
 """
 
 import torch
@@ -26,9 +26,10 @@ class DependencyGNN(nn.Module):
     def __init__(self, node_hidden_size, gnn_hidden_size, num_heads, dropout=0.1):
         super(DependencyGNN, self).__init__()
 
-        self.gnn_fw = GATConv(node_hidden_size, gnn_hidden_size, num_heads, concat=False, dropout=dropout)
-        self.gnn_bw = GATConv(node_hidden_size, gnn_hidden_size, num_heads, concat=False, dropout=dropout)
-        self.dense = nn.Linear(2 * gnn_hidden_size, gnn_hidden_size)
+        self.gnn1 = GATConv(node_hidden_size, gnn_hidden_size, num_heads, concat=False, dropout=dropout)
+        self.gnn2 = GATConv(node_hidden_size, gnn_hidden_size, num_heads, concat=False, dropout=dropout)
+        self.gnn3 = GATConv(node_hidden_size, gnn_hidden_size, num_heads, concat=False, dropout=dropout)
+        self.activation = torch.nn.ELU()
 
     def forward(self, node_embeddings, src_index, tgt_index):
         """
@@ -45,11 +46,12 @@ class DependencyGNN(nn.Module):
         batch_size = node_embeddings.shape[0]
         num_nodes = node_embeddings.shape[1]
 
-        memory_fw, edge_index_fw = generate_batch_data(node_embeddings, src_index, tgt_index)
-        memory_fw = self.gnn_fw(memory_fw, edge_index_fw)
-        memory_bw, edge_index_bw = generate_batch_data(node_embeddings, tgt_index, src_index)
-        memory_bw = self.gnn_bw(memory_bw, edge_index_bw)
-        node_embeddings = torch.cat([memory_fw, memory_bw], dim=-1).view([batch_size, num_nodes, -1])
-        node_embeddings = self.dense(node_embeddings)
+        memory, edge_index = generate_batch_data(node_embeddings, src_index, tgt_index)
+        memory = self.gnn1(memory, edge_index)
+        memory = self.activation(memory)
+        memory = self.gnn2(memory, edge_index)
+        memory = self.activation(memory)
+        memory = self.gnn2(memory, edge_index)
+        node_embeddings = memory.view([batch_size, num_nodes, -1])
 
         return node_embeddings

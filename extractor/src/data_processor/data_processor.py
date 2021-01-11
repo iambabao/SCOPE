@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/12/29
+@Last modified date : 2021/1/8
 """
 
 import os
@@ -24,9 +24,12 @@ logger = logging.getLogger(__name__)
 
 
 class InputExample(object):
-    def __init__(self, guid, context, phrase_spans):
+    def __init__(self, guid, context, token_spans, src_index, tgt_index, phrase_spans):
         self.guid = guid
         self.context = context
+        self.token_spans = token_spans
+        self.src_index = src_index
+        self.tgt_index = tgt_index
         self.phrase_spans = phrase_spans
 
     def __repr__(self):
@@ -43,15 +46,17 @@ class InputExample(object):
 
 
 class InputFeatures(object):
-    def __init__(self, guid, input_ids, attention_mask=None, token_type_ids=None, src_index=None, tgt_index=None,
-                 offset_mapping=None, start_labels=None, end_labels=None, phrase_labels=None):
+    def __init__(self, guid, input_ids, attention_mask=None, token_type_ids=None,
+                 token_mapping=None, src_index=None, tgt_index=None, num_tokens=None,
+                 start_labels=None, end_labels=None, phrase_labels=None):
         self.guid = guid
         self.input_ids = input_ids
         self.attention_mask = attention_mask
         self.token_type_ids = token_type_ids
+        self.token_mapping = token_mapping
         self.src_index = src_index
         self.tgt_index = tgt_index
-        self.offset_mapping = offset_mapping
+        self.num_tokens = num_tokens
         self.start_labels = start_labels
         self.end_labels = end_labels
         self.phrase_labels = phrase_labels
@@ -69,82 +74,59 @@ class InputFeatures(object):
         return json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
 
 
-def initialize_pyramid_tree(attention_mask, seq_length):
-    src_index = []
-    tgt_index = []
-    for i in range(seq_length):
-        for j in range(i, seq_length):
-            src = i * seq_length + j
-
-            # edges to siblings
-            if i == j:
-                ii, jj = i - 1, j - 1
-                if 0 <= ii < seq_length and 0 <= jj < seq_length and attention_mask[ii] * attention_mask[jj] != 0:
-                    tgt = ii * seq_length + jj
-                    src_index.append(src)
-                    tgt_index.append(tgt)
-                ii, jj = i + 1, j + 1
-                if 0 <= ii < seq_length and 0 <= jj < seq_length and attention_mask[ii] * attention_mask[jj] != 0:
-                    tgt = ii * seq_length + jj
-                    src_index.append(src)
-                    tgt_index.append(tgt)
-
-            # edges to parent
-            ii, jj = i, j + 1
-            if 0 <= ii < seq_length and 0 <= jj < seq_length and attention_mask[ii] * attention_mask[jj] != 0:
-                tgt = ii * seq_length + jj
-                src_index.append(src)
-                tgt_index.append(tgt)
-            ii, jj = i - 1, j
-            if 0 <= ii < seq_length and 0 <= jj < seq_length and attention_mask[ii] * attention_mask[jj] != 0:
-                tgt = ii * seq_length + jj
-                src_index.append(src)
-                tgt_index.append(tgt)
-
-    return src_index, tgt_index
-
-
-def convert_examples_to_features(examples, tokenizer, max_length=512):
+def convert_examples_to_features(examples, tokenizer, max_length, max_num_tokens):
     features = []
     for (ex_index, example) in enumerate(tqdm(examples, desc="Converting Examples")):
-        encoded = tokenizer.encode_plus(
+        encoded = {"guid": example.guid}
+
+        encoded.update(tokenizer.encode_plus(
             example.context,
             padding="max_length",
             truncation="longest_first",
             max_length=max_length,
             return_offsets_mapping=True,
-        )
-        encoded["guid"] = example.guid
+        ))
 
-        # initialize tree
-        encoded["src_index"], encoded["tgt_index"] = initialize_pyramid_tree(encoded["attention_mask"], max_length)
+        # initialize graph
+        token_mapping = [max_num_tokens - 1] * max_length
+        for i, (start, end) in enumerate(encoded["offset_mapping"]):
+            for j, (token, token_start, token_end) in enumerate(example.token_spans[:max_num_tokens]):
+                if token_start <= start < end <= token_end:
+                    token_mapping[i] = j
+        src_index, tgt_index = [], []
+        for src, tgt in zip(example.src_index, example.tgt_index):
+            if src >= max_num_tokens or tgt >= max_num_tokens: continue
+            src_index.append(src)
+            tgt_index.append(tgt)
+            src_index.append(tgt)
+            tgt_index.append(src)
+        encoded["token_mapping"] = token_mapping
+        encoded["src_index"] = src_index
+        encoded["tgt_index"] = tgt_index
+        encoded["num_tokens"] = min(len(example.token_spans), max_num_tokens)
 
         # initialize labels
-        start_labels = [0] * max_length
-        end_labels = [0] * max_length
-        phrase_labels = [[0] * max_length for _ in range(max_length)]
+        start_labels = [0] * max_num_tokens
+        end_labels = [0] * max_num_tokens
+        phrase_labels = [[0] * max_num_tokens for _ in range(max_num_tokens)]
         for _, phrase_start, phrase_end in example.phrase_spans:
-            start_index, end_index = -1, -1
-            for i, (start, end) in enumerate(encoded["offset_mapping"]):
-                if start <= phrase_start < end: start_index = i
-                if start < phrase_end <= end: end_index = i
-            if start_index == -1 or end_index == -1 or start_index > end_index: continue
-            start_labels[start_index] = 1
-            end_labels[end_index] = 1
-            phrase_labels[start_index][end_index] = 1
+            if phrase_start >= max_num_tokens or phrase_end >= max_num_tokens: continue
+            start_labels[phrase_start] = 1
+            end_labels[phrase_end] = 1
+            phrase_labels[phrase_start][phrase_end] = 1
         encoded["start_labels"] = start_labels
         encoded["end_labels"] = end_labels
-        encoded["phrase_labels"] = coo_matrix(phrase_labels).reshape(1, max_length * max_length)
+        encoded["phrase_labels"] = coo_matrix(phrase_labels).reshape(1, max_num_tokens * max_num_tokens)
 
+        del encoded["offset_mapping"]
         features.append(InputFeatures(**encoded))
 
         if ex_index < 5:
             logger.info("*** Example ***")
             logger.info("guid: {}".format(encoded["guid"]))
             logger.info("input_ids: {}".format(encoded["input_ids"]))
-            logger.info("start_labels: {}".format(encoded["start_labels"]))
-            logger.info("end_labels: {}".format(encoded["end_labels"]))
-            logger.info("tokens: {}".format(tokenizer.decode(encoded["input_ids"], skip_special_tokens=True)))
+            logger.info("token_mapping: {}".format(encoded["token_mapping"]))
+            logger.info("tokens: {}".format([v[0] for v in example.token_spans]))
             logger.info("phrases: {}".format([v[0] for v in example.phrase_spans]))
 
     return features
@@ -152,16 +134,18 @@ def convert_examples_to_features(examples, tokenizer, max_length=512):
 
 class DataProcessor:
     def __init__(
-        self,
-        model_type,
-        model_name_or_path,
-        max_seq_length,
-        data_dir="",
-        overwrite_cache=False
+            self,
+            model_type,
+            model_name_or_path,
+            max_seq_length,
+            max_num_tokens,
+            data_dir="",
+            overwrite_cache=False
     ):
         self.model_type = model_type
         self.model_name_or_path = model_name_or_path
         self.max_seq_length = max_seq_length
+        self.max_num_tokens = max_num_tokens
 
         self.data_dir = data_dir
         self.cache_dir = os.path.join(data_dir, "cache_extractor")
@@ -177,7 +161,7 @@ class DataProcessor:
         else:
             examples = []
             for line in tqdm(
-                list(read_json_lines(os.path.join(self.data_dir, "data_{}.json".format(role)))),
+                list(read_json_lines(os.path.join(self.data_dir, "data_{}.tree.json".format(role)))),
                 desc="Loading Examples"
             ):
                 sample = {'guid': len(examples)}
@@ -198,7 +182,7 @@ class DataProcessor:
             logger.info("Loading features from cached file {}".format(cached_features))
             features = torch.load(cached_features)
         else:
-            features = convert_examples_to_features(examples, tokenizer, self.max_seq_length)
+            features = convert_examples_to_features(examples, tokenizer, self.max_seq_length, self.max_num_tokens)
             logger.info("Saving features into cached file {}".format(cached_features))
             torch.save(features, cached_features)
 
@@ -213,10 +197,10 @@ class DataProcessor:
         else:
             all_token_type_ids = torch.tensor([[0] * self.max_seq_length for _ in features], dtype=torch.long)
 
+        all_token_mapping = torch.tensor([f.token_mapping for f in features], dtype=torch.long)
         all_src_index = torch.tensor(pad_batch([f.src_index for f in features], 0), dtype=torch.long)
         all_tgt_index = torch.tensor(pad_batch([f.tgt_index for f in features], 0), dtype=torch.long)
-
-        all_offset_mappings = torch.tensor([f.offset_mapping for f in features], dtype=torch.long)
+        all_num_tokens = torch.tensor([f.num_tokens for f in features], dtype=torch.long)
 
         all_start_labels = torch.tensor([f.start_labels for f in features], dtype=torch.long)
         all_end_labels = torch.tensor([f.end_labels for f in features], dtype=torch.long)
@@ -227,17 +211,27 @@ class DataProcessor:
             size=all_phrase_labels.shape,
             dtype=torch.long,
         )
+
         dataset = TensorDataset(
-            all_input_ids, all_attention_mask, all_token_type_ids, all_src_index, all_tgt_index,
-            all_offset_mappings, all_start_labels, all_end_labels, all_phrase_labels,
+            all_input_ids, all_attention_mask, all_token_type_ids,
+            all_token_mapping, all_src_index, all_tgt_index, all_num_tokens,
+            all_start_labels, all_end_labels, all_phrase_labels,
         )
 
         return dataset
 
     def _load_line(self, line):
-        context = line["context"]
-        qas = line["qas"]
+        token_spans = []
+        for v in line['token_spans']: token_spans.extend(v)
+        src_index = []
+        for v in line['src_index']: src_index.extend(v)
+        tgt_index = []
+        for v in line['tgt_index']: tgt_index.extend(v)
 
-        phrase_spans = [(qa['answer'], qa["answer_start"], qa["answer_end"]) for qa in qas]
-
-        return {"context": context, "phrase_spans": phrase_spans}
+        return {
+            'context': line['context'],
+            'token_spans': token_spans,
+            'src_index': src_index,
+            'tgt_index': tgt_index,
+            'phrase_spans': line['phrase_spans']
+        }

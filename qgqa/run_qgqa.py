@@ -5,7 +5,7 @@
 @Date               : 2020/10/13
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/12/8
+@Last modified date : 2021/1/6
 """
 
 import logging
@@ -25,11 +25,11 @@ def read_data(filename, is_golden):
     for line in tqdm(list(read_json_lines(filename)), desc='Reading data'):
         context = line['context']
         if is_golden:
-            for qa in line['qas']:
-                data.append({'context': context, 'answer': (qa['answer'], qa['answer_start'], qa['answer_end'])})
+            for span in line['golden']:
+                data.append({'context': context, 'answer': span})
         else:
-            for answer in line['predicted']:
-                data.append({'context': context, 'answer': answer})
+            for span in line['predicted']:
+                data.append({'context': context, 'answer': span})
     return data
 
 

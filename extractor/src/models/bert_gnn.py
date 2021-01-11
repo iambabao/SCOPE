@@ -5,14 +5,14 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/12/29
+@Last modified date : 2021/1/8
 """
 
 import torch
 import torch.nn as nn
 from transformers import BertModel, BertPreTrainedModel
 
-from .pyramid_gnn import PyramidGNN
+from .dependency_gnn import DependencyGNN
 from .utils import ce_loss, pu_loss
 
 
@@ -20,33 +20,34 @@ class BertGNNExtractor(BertPreTrainedModel):
     def __init__(self, config, **kwargs):
         super().__init__(config)
 
-        self.gnn_hidden_size = kwargs.get('gnn_hidden_size', 256)
-        self.num_gnn_heads = kwargs.get('num_gnn_heads', 2)
         self.num_labels = config.num_labels
+        self.gnn_hidden_size = kwargs.get('gnn_hidden_size', config.hidden_size)
+        self.num_gnn_heads = kwargs.get('num_gnn_heads', 2)
         self.loss_type = kwargs.get('loss_type')
-        self.prior_token = kwargs.get('prior_token')
-        self.prior_phrase = kwargs.get('prior_phrase')
+        self.prior_token = kwargs.get('prior_token') / 100
+        self.prior_phrase = kwargs.get('prior_phrase') / 100
 
         self.bert = BertModel(config)
-        self.dense = nn.Linear(self.config.hidden_size, self.config.hidden_size)
+        self.dense1 = nn.Linear(config.hidden_size, 512)
+        self.dense2 = nn.Linear(512, 512, bias=False)
         self.start_layer = nn.Sequential(
-            self.dense,
+            self.dense2,
             nn.ReLU(),
             nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(self.config.hidden_size, config.num_labels),
+            nn.Linear(512, config.num_labels),
         )
         self.end_layer = nn.Sequential(
-            self.dense,
+            self.dense2,
             nn.ReLU(),
             nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(self.config.hidden_size, config.num_labels),
+            nn.Linear(512, config.num_labels),
         )
-        self.pyramid_gnn = PyramidGNN(
-            config.hidden_size * 2,
-            self.gnn_hidden_size,
-            self.num_gnn_heads,
-            config.num_labels,
-            dropout=config.hidden_dropout_prob,
+        self.dependency_gnn = DependencyGNN(512, 512, 2)
+        self.phrase_layer = nn.Sequential(
+            nn.Linear(1024, 512, bias=False),
+            nn.ReLU(),
+            nn.Dropout(config.hidden_dropout_prob),
+            nn.Linear(512, config.num_labels),
         )
 
         self.init_weights()
@@ -56,17 +57,22 @@ class BertGNNExtractor(BertPreTrainedModel):
             input_ids=None,
             attention_mask=None,
             token_type_ids=None,
+            token_mapping=None,
             src_index=None,
             tgt_index=None,
+            num_tokens=None,
             start_labels=None,
             end_labels=None,
             phrase_labels=None,
     ):
-        max_seq_length = input_ids.shape[1]
-        # mask for real tokens
+        batch_size = input_ids.shape[0]
+        max_num_tokens = input_ids.shape[1]  # equal to max_seq_length
+        # mask for real tokens with shape (batch_size, max_num_tokens)
+        token_mask = torch.arange(max_num_tokens).expand(len(num_tokens), max_num_tokens).to(self.device) < num_tokens.unsqueeze(1)
+        # mask for valid phrases with shape (batch_size, max_num_tokens, max_num_tokens)
         phrase_mask = torch.logical_and(
-            attention_mask.unsqueeze(-1).expand(-1, -1, max_seq_length),
-            attention_mask.unsqueeze(-2).expand(-1, max_seq_length, -1)
+            token_mask.unsqueeze(-1).expand(-1, -1, max_num_tokens),
+            token_mask.unsqueeze(-2).expand(-1, max_num_tokens, -1),
         ).triu()
 
         outputs = self.bert(
@@ -76,19 +82,31 @@ class BertGNNExtractor(BertPreTrainedModel):
         )
         sequence_output = outputs[0]  # (batch_size, max_seq_length, hidden_size)
 
-        start_logits = self.start_layer(sequence_output)  # (batch_size, max_seq_length, 2)
-        end_logits = self.end_layer(sequence_output)  # (batch_size, max_seq_length, 2)
-        outputs = (attention_mask.unsqueeze(-1) * start_logits, attention_mask.unsqueeze(-1) * end_logits) + outputs
+        # reconstruct sequence_output to token_embeddings with shape (batch_size, max_num_tokens, hidden_size)
+        expanded_token_mapping = token_mapping.unsqueeze(-1).repeat(1, 1, self.config.hidden_size)
+        zeros = torch.zeros([batch_size, max_num_tokens, self.config.hidden_size], dtype=torch.float).to(self.device)
+        token_embeddings = torch.scatter_add(zeros, 1, expanded_token_mapping, sequence_output)
+        zeros = torch.zeros([batch_size, max_num_tokens], dtype=torch.long).to(self.device)
+        token_counter = torch.scatter_add(zeros, 1, token_mapping, torch.ones_like(token_mapping))
+        token_counter = torch.max(token_counter, torch.ones_like(token_counter))
+        token_embeddings = token_embeddings / token_counter.unsqueeze(-1)
+        token_embeddings = self.dense1(token_embeddings)  # (batch_size, max_num_tokens, 512)
 
-        start_expanded = sequence_output.unsqueeze(2).expand(-1, -1, max_seq_length, -1)
-        end_expanded = sequence_output.unsqueeze(1).expand(-1, max_seq_length, -1, -1)
+        start_logits = self.start_layer(token_embeddings)  # (batch_size, max_num_tokens, 2)
+        end_logits = self.end_layer(token_embeddings)  # (batch_size, max_num_tokens, 2)
+        outputs = (token_mask.unsqueeze(-1) * start_logits, token_mask.unsqueeze(-1) * end_logits) + outputs
+
+        # dependency gnn
+        token_embeddings = token_embeddings + self.dependency_gnn(token_embeddings, src_index, tgt_index)
+
+        start_expanded = token_embeddings.unsqueeze(2).expand(-1, -1, max_num_tokens, -1)
+        end_expanded = token_embeddings.unsqueeze(1).expand(-1, max_num_tokens, -1, -1)
         phrase_matrix = torch.cat([start_expanded, end_expanded], dim=-1)
-        # (batch_size, max_seq_length, max_seq_length, num_labels)
-        phrase_logits = self.pyramid_gnn(phrase_matrix, src_index, tgt_index)
+        phrase_logits = self.phrase_layer(phrase_matrix)  # (batch_size, max_num_tokens, max_num_tokens, 2)
         outputs = (phrase_mask.unsqueeze(-1) * phrase_logits,) + outputs
 
         if None not in [start_labels, end_labels, phrase_labels]:
-            phrase_labels = phrase_labels.reshape(-1, max_seq_length, max_seq_length)
+            phrase_labels = phrase_labels.reshape(-1, max_num_tokens, max_num_tokens)
             if self.loss_type == 'ce':
                 start_loss = ce_loss(start_logits, start_labels, self.num_labels, attention_mask == 1)
                 end_loss = ce_loss(end_logits, end_labels, self.num_labels, attention_mask == 1)
@@ -107,14 +125,14 @@ class BertGNNExtractor(BertPreTrainedModel):
                 else: end_loss = -n_risk
 
                 golden_mask = torch.logical_and(
-                    start_labels.unsqueeze(-1).expand(-1, -1, max_seq_length),
-                    end_labels.unsqueeze(-2).expand(-1, max_seq_length, -1)
+                    start_labels.unsqueeze(-1).expand(-1, -1, max_num_tokens),
+                    end_labels.unsqueeze(-2).expand(-1, max_num_tokens, -1)
                 )  # mask for golden start and end tokens
                 predicted_mask = torch.logical_and(
-                    (torch.argmax(start_logits, dim=-1) == 1).unsqueeze(-1).expand(-1, -1, max_seq_length),
-                    (torch.argmax(end_logits, dim=-1) == 1).unsqueeze(-2).expand(-1, max_seq_length, -1)
+                    (torch.argmax(start_logits, dim=-1) == 1).unsqueeze(-1).expand(-1, -1, max_num_tokens),
+                    (torch.argmax(end_logits, dim=-1) == 1).unsqueeze(-2).expand(-1, max_num_tokens, -1)
                 )  # mask for predicted start and end tokens
-                phrase_mask &= (golden_mask | predicted_mask)  # maks for all positive tokens
+                phrase_mask &= (golden_mask | predicted_mask)  # maks for valid phrases
                 p_risk = pu_loss(phrase_logits, 1, phrase_mask & (phrase_labels == 1))
                 u_risk = pu_loss(phrase_logits, 0, phrase_mask & (phrase_labels == 0))
                 n_risk = u_risk - self.prior_phrase * pu_loss(phrase_logits, 0, phrase_mask & (phrase_labels == 1))

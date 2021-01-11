@@ -5,7 +5,7 @@
 @Date               : 2020/1/1
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/12/29
+@Last modified date : 2020/4/25
 """
 
 import json
@@ -177,63 +177,3 @@ def load_glove_embedding(data_file, word_list):
 
 
 # ====================
-def generate_outputs(offset_mappings, start_predicted, end_predicted, phrase_predicted):
-    outputs = []
-    for mapping, start_flags, end_flags, phrase_flags in zip(
-        offset_mappings, start_predicted, end_predicted, phrase_predicted
-    ):
-        item = {
-            'predicted_start': [i for i, is_start in enumerate(start_flags) if is_start],
-            'predicted_end': [i for i, is_end in enumerate(end_flags) if is_end],
-            'predicted': []
-        }
-        for i in item['predicted_start']:
-            for j in item['predicted_end']:
-                if phrase_flags[i][j] == 1:
-                    item['predicted'].append((int(mapping[i][0]), int(mapping[j][1])))
-        outputs.append(item)
-    return outputs
-
-
-def refine_outputs(examples, outputs):
-    refined_outputs = []
-    for example, entry in zip(examples, outputs):
-        context = example.context
-        golden_start = [start for phrase, start, end in example.phrase_spans]
-        golden_end = [end for phrase, start, end in example.phrase_spans]
-        golden = example.phrase_spans
-        predicted = [(context[start:end], start, end) for start, end in entry['predicted']]
-        refined_outputs.append({
-            'context': context,
-            'golden': golden,
-            'predicted': predicted,
-            'golden_start': golden_start,
-            'predicted_start': entry['predicted_start'],
-            'golden_end': golden_end,
-            'predicted_end': entry['predicted_end'],
-        })
-    return refined_outputs
-
-
-def compute_metrics(outputs):
-    results = {'Golden': 0, 'Predicted': 0, 'Matched': 0}
-    for item in outputs:
-        golden = set([v[0] for v in item['golden']])
-        predicted = set([v[0] for v in item['predicted']])
-        results['Golden'] += len(golden)
-        results['Predicted'] += len(predicted)
-        results['Matched'] += len(golden & predicted)
-    if results['Golden'] == 0:
-        if results['Predicted'] == 0:
-            results['Precision'] = results['Recall'] = results['F1'] = 1.0
-        else:
-            results['Precision'] = results['Recall'] = results['F1'] = 0.0
-    else:
-        if results['Matched'] == 0 or results['Predicted'] == 0:
-            results['Precision'] = results['Recall'] = results['F1'] = 0.0
-        else:
-            results['Precision'] = results['Matched'] / results['Predicted']
-            results['Recall'] = results['Matched'] / results['Golden']
-            results['F1'] = 2 * results['Precision'] * results['Recall'] / (results['Precision'] + results['Recall'])
-
-    return results

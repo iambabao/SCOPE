@@ -58,7 +58,7 @@ class Generator:
                 context = entry['context']
                 answer, answer_start, answer_end = entry['answer']
                 context = context[:answer_start] + '<hl> ' + answer + ' <hl>' + context[answer_end:]
-                context = 'generate question: {} </s>'.format(context)
+                context = 'generate question: {}'.format(context)
                 batch_text.append(context)
             inputs = self.tokenizer.batch_encode_plus(
                 batch_text,

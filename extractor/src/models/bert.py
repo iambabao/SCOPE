@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2020/12/29
+@Last modified date : 2021/1/8
 """
 
 import torch
@@ -20,22 +20,30 @@ class BertExtractor(BertPreTrainedModel):
         super().__init__(config)
 
         self.num_labels = config.num_labels
-        self.max_num_types = kwargs.get('max_num_types')
-        self.feature_size = kwargs.get('feature_size')
         self.loss_type = kwargs.get('loss_type')
-        self.prior_token = kwargs.get('prior_token')
-        self.prior_phrase = kwargs.get('prior_phrase')
+        self.prior_token = kwargs.get('prior_token') / 100
+        self.prior_phrase = kwargs.get('prior_phrase') / 100
 
         self.bert = BertModel(config)
-        self.type_embedding = nn.Embedding(self.max_num_types + 1, self.feature_size)
-        self.dense = nn.Linear(config.hidden_size + self.feature_size, config.hidden_size)
-        self.start_layer = nn.Linear(config.hidden_size, config.num_labels)
-        self.end_layer = nn.Linear(config.hidden_size, config.num_labels)
-        self.phrase_layer = nn.Sequential(
-            nn.Linear(config.hidden_size * 2, config.hidden_size),
+        self.dense1 = nn.Linear(config.hidden_size, 512)
+        self.dense2 = nn.Linear(512, 512, bias=False)
+        self.start_layer = nn.Sequential(
+            self.dense2,
             nn.ReLU(),
             nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(config.hidden_size, config.num_labels),
+            nn.Linear(512, config.num_labels),
+        )
+        self.end_layer = nn.Sequential(
+            self.dense2,
+            nn.ReLU(),
+            nn.Dropout(config.hidden_dropout_prob),
+            nn.Linear(512, config.num_labels),
+        )
+        self.phrase_layer = nn.Sequential(
+            nn.Linear(1024, 512, bias=False),
+            nn.ReLU(),
+            nn.Dropout(config.hidden_dropout_prob),
+            nn.Linear(512, config.num_labels),
         )
 
         self.init_weights()
@@ -46,14 +54,13 @@ class BertExtractor(BertPreTrainedModel):
             attention_mask=None,
             token_type_ids=None,
             token_mapping=None,
-            token_type=None,
             num_tokens=None,
             start_labels=None,
             end_labels=None,
             phrase_labels=None,
     ):
         batch_size = input_ids.shape[0]
-        max_num_tokens = token_type.shape[1]
+        max_num_tokens = input_ids.shape[1]  # equal to max_seq_length
         # mask for real tokens with shape (batch_size, max_num_tokens)
         token_mask = torch.arange(max_num_tokens).expand(len(num_tokens), max_num_tokens).to(self.device) < num_tokens.unsqueeze(1)
         # mask for valid phrases with shape (batch_size, max_num_tokens, max_num_tokens)
@@ -73,15 +80,11 @@ class BertExtractor(BertPreTrainedModel):
         expanded_token_mapping = token_mapping.unsqueeze(-1).repeat(1, 1, self.config.hidden_size)
         zeros = torch.zeros([batch_size, max_num_tokens, self.config.hidden_size], dtype=torch.float).to(self.device)
         token_embeddings = torch.scatter_add(zeros, 1, expanded_token_mapping, sequence_output)
-
-        # mean pooling over token_embeddings
         zeros = torch.zeros([batch_size, max_num_tokens], dtype=torch.long).to(self.device)
         token_counter = torch.scatter_add(zeros, 1, token_mapping, torch.ones_like(token_mapping))
         token_counter = torch.max(token_counter, torch.ones_like(token_counter))
         token_embeddings = token_embeddings / token_counter.unsqueeze(-1)
-
-        type_em = self.type_embedding(token_type)
-        token_embeddings = self.dense(torch.cat([token_embeddings, type_em], dim=-1))
+        token_embeddings = self.dense1(token_embeddings)  # (batch_size, max_num_tokens, 512)
 
         start_logits = self.start_layer(token_embeddings)  # (batch_size, max_num_tokens, 2)
         end_logits = self.end_layer(token_embeddings)  # (batch_size, max_num_tokens, 2)
