@@ -5,7 +5,7 @@
 @Date               : 2020/1/1
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/11/29
+@Last modified date : 2021/1/13
 """
 
 import json
@@ -180,51 +180,39 @@ def load_glove_embedding(data_file, word_list):
 def generate_outputs(start_predicted, end_predicted, phrase_predicted):
     outputs = []
     for start_flags, end_flags, phrase_flags in zip(start_predicted, end_predicted, phrase_predicted):
-        item = {
-            'predicted_start': [i for i, is_start in enumerate(start_flags) if is_start],
-            'predicted_end': [i for i, is_end in enumerate(end_flags) if is_end],
-            'predicted': []
-        }
-        for i in item['predicted_start']:
-            for j in item['predicted_end']:
-                if phrase_flags[i][j] == 1:
-                    item['predicted'].append((i, j))
-        outputs.append(item)
+        predicted_spans = []
+        for i, is_start in enumerate(start_flags):
+            if not is_start: continue
+            for j, is_end in enumerate(end_flags):
+                if not is_end: continue
+                if phrase_flags[i][j]:
+                    predicted_spans.append((i, j))
+        outputs.append(predicted_spans)
     return outputs
 
 
 def refine_outputs(examples, outputs):
     refined_outputs = []
-    for example, entry in zip(examples, outputs):
+    for example, predicted_spans in zip(examples, outputs):
         context = example.context
         token_spans = example.token_spans
-        golden_start = [start for phrase, start, end in example.phrase_spans]
-        golden_end = [end for phrase, start, end in example.phrase_spans]
         golden = [
             (context[token_spans[start][1]:token_spans[end][2]], token_spans[start][1], token_spans[end][2])
             for phrase, start, end in example.phrase_spans
         ]
         predicted = [
             (context[token_spans[start][1]:token_spans[end][2]], token_spans[start][1], token_spans[end][2])
-            for start, end in entry['predicted']
+            for start, end in predicted_spans
         ]
-        refined_outputs.append({
-            'context': context,
-            'golden': golden,
-            'predicted': predicted,
-            'golden_start': golden_start,
-            'predicted_start': entry['predicted_start'],
-            'golden_end': golden_end,
-            'predicted_end': entry['predicted_end'],
-        })
+        refined_outputs.append({'context': context, 'golden': golden, 'predicted': predicted})
     return refined_outputs
 
 
 def compute_metrics(outputs):
     results = {'Golden': 0, 'Predicted': 0, 'Matched': 0}
     for item in outputs:
-        golden = set([v[0] for v in item['golden']])
-        predicted = set([v[0] for v in item['predicted']])
+        golden = set([(v[1], v[2]) for v in item['golden']])
+        predicted = set([(v[1], v[2]) for v in item['predicted']])
         results['Golden'] += len(golden)
         results['Predicted'] += len(predicted)
         results['Matched'] += len(golden & predicted)
@@ -240,5 +228,5 @@ def compute_metrics(outputs):
             results['Precision'] = results['Matched'] / results['Predicted']
             results['Recall'] = results['Matched'] / results['Golden']
             results['F1'] = 2 * results['Precision'] * results['Recall'] / (results['Precision'] + results['Recall'])
-
+    results['average'] = sum([len(item['predicted']) for item in outputs]) / len(outputs)
     return results

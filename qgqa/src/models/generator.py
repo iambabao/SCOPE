@@ -5,7 +5,7 @@
 @Date               : 2020/10/13
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/12/26
+@Last modified date : 2021/1/13
 """
 
 from tqdm import tqdm
@@ -75,7 +75,7 @@ class Generator:
             ids_with_beam = ids_with_beam.reshape([len(batch_text), beam_size, -1])
             all_ids_with_beam.extend(ids_with_beam.detach().cpu().tolist())
 
-        for i, ids_with_beam in enumerate(all_ids_with_beam):
+        for i, ids_with_beam in tqdm(enumerate(all_ids_with_beam), desc='Decoding outputs'):
             input_data[i]['questions'] = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in ids_with_beam]
 
         return input_data

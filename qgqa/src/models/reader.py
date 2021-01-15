@@ -84,11 +84,9 @@ class Reader:
             for mappings, entry in zip(offset_mappings, _input_data[batch_start:batch_end]):
                 token_start, token_end = -1, -1
                 # We keep the last match because the offset mapping of context is behind the question
-                for i, (start, end) in enumerate(mappings):
-                    if start <= entry['answer'][1] < end: token_start = i
-                    if start < entry['answer'][2] <= end: token_end = i
-                if token_start == -1: token_start = 0
-                if token_end == -1: token_end = len(mappings)
+                for i in range(len(mappings) - 1):
+                    if mappings[i][0] <= entry['answer'][1] < mappings[i + 1][0]: token_start = i
+                    if mappings[i][1] <= entry['answer'][2] <= mappings[i + 1][0]: token_end = i
                 answer_indices.append((token_start, token_end))
             assert len(answer_indices) == len(batch_text_pairs)
 
@@ -101,7 +99,10 @@ class Reader:
             end_scores = torch.softmax(end_scores, dim=-1).detach().cpu().tolist()
 
             for i, (start_score, end_score, (start, end)) in enumerate(zip(start_scores, end_scores, answer_indices)):
-                all_scores.append((start_score[start], end_score[end]))
+                if start == --1 or end == -1:
+                    all_scores.append((max(start_score), max(end_score)))
+                else:
+                    all_scores.append((start_score[start], end_score[end]))
 
         for i in range(len(input_data)):
             start = i * beam_size

@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2021/1/8
+@Last modified date : 2021/1/13
 """
 
 import argparse
@@ -112,7 +112,9 @@ def train(args, data_processor, model, tokenizer, role):
                 "input_ids": batch[0].to(args.device),
                 "attention_mask": batch[1].to(args.device),
                 "token_mapping": batch[3].to(args.device),
-                "num_tokens": batch[6].to(args.device),
+                "pos_tag": batch[4].to(args.device),
+                "ner_tag": batch[5].to(args.device),
+                "num_tokens": batch[8].to(args.device),
                 "start_labels": batch[-3].to(args.device),
                 "end_labels": batch[-2].to(args.device),
                 "phrase_labels": batch[-1].to_dense().to(args.device),
@@ -121,8 +123,8 @@ def train(args, data_processor, model, tokenizer, role):
             if args.model_type in ["bert", "xlnet", "albert"]:
                 inputs["token_type_ids"] = batch[2].to(args.device)
             if "gnn" in args.model_type:
-                inputs["src_index"] = batch[4].to(args.device)
-                inputs["tgt_index"] = batch[5].to(args.device)
+                inputs["src_index"] = batch[6].to(args.device)
+                inputs["tgt_index"] = batch[7].to(args.device)
 
             outputs = model(**inputs)
             loss = outputs[0]
@@ -215,7 +217,9 @@ def evaluate(args, data_processor, model, tokenizer, role, prefix=""):
                 "input_ids": batch[0].to(args.device),
                 "attention_mask": batch[1].to(args.device),
                 "token_mapping": batch[3].to(args.device),
-                "num_tokens": batch[6].to(args.device),
+                "pos_tag": batch[4].to(args.device),
+                "ner_tag": batch[5].to(args.device),
+                "num_tokens": batch[8].to(args.device),
                 "start_labels": batch[-3].to(args.device),
                 "end_labels": batch[-2].to(args.device),
                 "phrase_labels": batch[-1].to_dense().to(args.device),
@@ -224,8 +228,8 @@ def evaluate(args, data_processor, model, tokenizer, role, prefix=""):
             if args.model_type in ["bert", "xlnet", "albert"]:
                 inputs["token_type_ids"] = batch[2].to(args.device)
             if "gnn" in args.model_type:
-                inputs["src_index"] = batch[4].to(args.device)
-                inputs["tgt_index"] = batch[5].to(args.device)
+                inputs["src_index"] = batch[6].to(args.device)
+                inputs["tgt_index"] = batch[7].to(args.device)
 
             outputs = model(**inputs)
             phrase_logits, start_logits, end_logits = outputs[1], outputs[2], outputs[3]

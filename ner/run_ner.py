@@ -31,6 +31,7 @@ from transformers import (
 )
 from utils_ner import Split, TokenClassificationDataset, TokenClassificationTask
 
+from utils import init_logger
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ class DataTrainingArguments:
             "than this will be truncated, sequences shorter will be padded."
         },
     )
+    log_file: str = field(default=None, metadata={"help": "The log file."})
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
     )
@@ -120,11 +122,7 @@ def main():
         )
 
     # Setup logging
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO if training_args.local_rank in [-1, 0] else logging.WARN,
-    )
+    init_logger(logging.INFO if training_args.local_rank in [-1, 0] else logging.WARN, data_args.log_file)
     logger.warning(
         "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
         training_args.local_rank,

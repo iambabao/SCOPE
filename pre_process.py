@@ -5,7 +5,7 @@
 @Date               : 2020/6/16
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2021/1/2
+@Last modified date : 2021/1/13
 """
 
 import logging
@@ -27,10 +27,10 @@ def convert_data(filein):
             context = paragraph['context']
             phrase_spans = []
             for qa in paragraph['qas']:
-                if qa['is_impossible']: continue
                 for answer in qa['answers']:
-                    phrase_span = (answer['text'], answer['answer_start'], answer['answer_start'] + len(answer['text']))
-                    if phrase_span not in phrase_spans: phrase_spans.append(phrase_span)
+                    answer_span = (answer['text'], answer['answer_start'], answer['answer_start'] + len(answer['text']))
+                    if answer_span not in phrase_spans:
+                        phrase_spans.append(answer_span)
             new_data.append({'title': title, 'context': context, 'phrase_spans': phrase_spans})
 
     return new_data
@@ -39,8 +39,8 @@ def convert_data(filein):
 def main():
     init_logger(logging.INFO)
 
-    train_data = convert_data('data/SQuAD/train-v2.0.json')
-    dev_data = convert_data('data/SQuAD/dev-v2.0.json')
+    train_data = convert_data('data/SQuAD/train-v1.1.json')
+    dev_data = convert_data('data/SQuAD/dev-v1.1.json')
 
     # split into train, eval and test set
     # refer to: https://github.com/xinyadu/nqg
@@ -55,13 +55,9 @@ def main():
             train_split.append(line)
         elif line['title'] in test_titles:
             test_split.append(line)
-        else:
-            logger.info('title not found: {}'.format(line['title']))
     for line in dev_data:
         if line['title'] in eval_titles:
             eval_split.append(line)
-        else:
-            logger.info('title not found: {}'.format(line['title']))
 
     os.makedirs('data/phrase', exist_ok=True)
     save_json_lines(train_split, 'data/phrase/data_train.json')

@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2021/1/8
+@Last modified date : 2021/1/13
 """
 
 import os
@@ -18,16 +18,18 @@ from tqdm import tqdm
 from scipy.sparse import coo_matrix, vstack
 from torch.utils.data import TensorDataset
 
-from src.utils import read_json_lines, pad_batch
+from src.utils import read_json_lines, pad_list, pad_batch
 
 logger = logging.getLogger(__name__)
 
 
 class InputExample(object):
-    def __init__(self, guid, context, token_spans, src_index, tgt_index, phrase_spans):
+    def __init__(self, guid, context, token_spans, pos_tag, ner_tag, src_index, tgt_index, phrase_spans):
         self.guid = guid
         self.context = context
         self.token_spans = token_spans
+        self.pos_tag = pos_tag
+        self.ner_tag = ner_tag
         self.src_index = src_index
         self.tgt_index = tgt_index
         self.phrase_spans = phrase_spans
@@ -47,13 +49,16 @@ class InputExample(object):
 
 class InputFeatures(object):
     def __init__(self, guid, input_ids, attention_mask=None, token_type_ids=None,
-                 token_mapping=None, src_index=None, tgt_index=None, num_tokens=None,
+                 token_mapping=None, pos_tag=None, ner_tag=None,
+                 src_index=None, tgt_index=None, num_tokens=None,
                  start_labels=None, end_labels=None, phrase_labels=None):
         self.guid = guid
         self.input_ids = input_ids
         self.attention_mask = attention_mask
         self.token_type_ids = token_type_ids
         self.token_mapping = token_mapping
+        self.pos_tag = pos_tag
+        self.ner_tag = ner_tag
         self.src_index = src_index
         self.tgt_index = tgt_index
         self.num_tokens = num_tokens
@@ -87,12 +92,19 @@ def convert_examples_to_features(examples, tokenizer, max_length, max_num_tokens
             return_offsets_mapping=True,
         ))
 
-        # initialize graph
+        # initialize features
         token_mapping = [max_num_tokens - 1] * max_length
         for i, (start, end) in enumerate(encoded["offset_mapping"]):
             for j, (token, token_start, token_end) in enumerate(example.token_spans[:max_num_tokens]):
                 if token_start <= start < end <= token_end:
                     token_mapping[i] = j
+        encoded["token_mapping"] = token_mapping
+        pos_tag = pad_list(example.pos_tag, 16, max_length)  # 16 is X
+        ner_tag = pad_list(example.ner_tag, 51, max_length)  # 51 is O
+        encoded["pos_tag"] = pos_tag
+        encoded["ner_tag"] = ner_tag
+
+        # initialize graph
         src_index, tgt_index = [], []
         for src, tgt in zip(example.src_index, example.tgt_index):
             if src >= max_num_tokens or tgt >= max_num_tokens: continue
@@ -100,7 +112,6 @@ def convert_examples_to_features(examples, tokenizer, max_length, max_num_tokens
             tgt_index.append(tgt)
             src_index.append(tgt)
             tgt_index.append(src)
-        encoded["token_mapping"] = token_mapping
         encoded["src_index"] = src_index
         encoded["tgt_index"] = tgt_index
         encoded["num_tokens"] = min(len(example.token_spans), max_num_tokens)
@@ -126,6 +137,8 @@ def convert_examples_to_features(examples, tokenizer, max_length, max_num_tokens
             logger.info("guid: {}".format(encoded["guid"]))
             logger.info("input_ids: {}".format(encoded["input_ids"]))
             logger.info("token_mapping: {}".format(encoded["token_mapping"]))
+            logger.info("pos_tag: {}".format(encoded["pos_tag"]))
+            logger.info("ner_tag: {}".format(encoded["ner_tag"]))
             logger.info("tokens: {}".format([v[0] for v in example.token_spans]))
             logger.info("phrases: {}".format([v[0] for v in example.phrase_spans]))
 
@@ -161,7 +174,7 @@ class DataProcessor:
         else:
             examples = []
             for line in tqdm(
-                list(read_json_lines(os.path.join(self.data_dir, "data_{}.tree.json".format(role)))),
+                list(read_json_lines(os.path.join(self.data_dir, "data_{}.feature.json".format(role)))),
                 desc="Loading Examples"
             ):
                 sample = {'guid': len(examples)}
@@ -198,6 +211,8 @@ class DataProcessor:
             all_token_type_ids = torch.tensor([[0] * self.max_seq_length for _ in features], dtype=torch.long)
 
         all_token_mapping = torch.tensor([f.token_mapping for f in features], dtype=torch.long)
+        all_pos_tag = torch.tensor([f.pos_tag for f in features], dtype=torch.long)
+        all_ner_tag = torch.tensor([f.ner_tag for f in features], dtype=torch.long)
         all_src_index = torch.tensor(pad_batch([f.src_index for f in features], 0), dtype=torch.long)
         all_tgt_index = torch.tensor(pad_batch([f.tgt_index for f in features], 0), dtype=torch.long)
         all_num_tokens = torch.tensor([f.num_tokens for f in features], dtype=torch.long)
@@ -214,7 +229,8 @@ class DataProcessor:
 
         dataset = TensorDataset(
             all_input_ids, all_attention_mask, all_token_type_ids,
-            all_token_mapping, all_src_index, all_tgt_index, all_num_tokens,
+            all_token_mapping, all_pos_tag, all_ner_tag,
+            all_src_index, all_tgt_index, all_num_tokens,
             all_start_labels, all_end_labels, all_phrase_labels,
         )
 
@@ -223,6 +239,10 @@ class DataProcessor:
     def _load_line(self, line):
         token_spans = []
         for v in line['token_spans']: token_spans.extend(v)
+        pos_tag = []
+        for v in line['pos_tag']: pos_tag.extend(v)
+        ner_tag = []
+        for v in line['ner_tag']: ner_tag.extend(v)
         src_index = []
         for v in line['src_index']: src_index.extend(v)
         tgt_index = []
@@ -231,6 +251,8 @@ class DataProcessor:
         return {
             'context': line['context'],
             'token_spans': token_spans,
+            'pos_tag': pos_tag,
+            'ner_tag': ner_tag,
             'src_index': src_index,
             'tgt_index': tgt_index,
             'phrase_spans': line['phrase_spans']

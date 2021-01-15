@@ -17,13 +17,13 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 from gensim.summarization import keywords
 
-from src.utils import init_logger, read_json, save_json, read_json_lines
+from utils import init_logger, read_json, save_json, read_json_lines
 
 logger = logging.getLogger(__name__)
 
 
 def summ_with_textrank(filename):
-    score_file = '../data/summ/text_rank.json'
+    score_file = '../data/summary/text_rank.json'
     if os.path.exists(score_file):
         num2score = read_json(score_file)
     else:
@@ -51,7 +51,7 @@ def summ_with_textrank(filename):
 
 
 def summ_with_bertsum(filename):
-    score_file = '../data/summ/bert_sum.json'
+    score_file = '../data/summary/bert_sum.json'
     if os.path.exists(score_file):
         num2score = read_json(score_file)
     else:
@@ -79,8 +79,8 @@ def main():
     init_logger(logging.INFO)
 
     labels = ['0', '1', '2', '3', '4', '5', '>5']
-    textrank_scores = summ_with_textrank('../data/phrase/data_train.tree.json')
-    bertsum_scores = summ_with_bertsum('../data/phrase/data_train.tree.json')
+    textrank_scores = summ_with_textrank('../data/phrase/data_train.feature.json')
+    bertsum_scores = summ_with_bertsum('../data/phrase/data_train.feature.json')
 
     fig, axs = plt.subplots(1, 2, figsize=(8, 4))
 
@@ -103,8 +103,8 @@ def main():
     axs[1].spines['right'].set_color('none')
 
     fig.tight_layout()
-    plt.savefig('../data/summ/fig_score.pdf')
-    plt.show()
+    plt.savefig('../data/summary/fig_score.pdf')
+    # plt.show()
 
 
 if __name__ == '__main__':

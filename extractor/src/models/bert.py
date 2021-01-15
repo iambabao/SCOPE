@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2021/1/8
+@Last modified date : 2021/1/13
 """
 
 import torch
@@ -25,25 +25,27 @@ class BertExtractor(BertPreTrainedModel):
         self.prior_phrase = kwargs.get('prior_phrase') / 100
 
         self.bert = BertModel(config)
-        self.dense1 = nn.Linear(config.hidden_size, 512)
-        self.dense2 = nn.Linear(512, 512, bias=False)
+        self.pos_embedding = nn.Embedding(17, 128)
+        self.ner_embedding = nn.Embedding(69, 128)
+        self.dense1 = nn.Linear(config.hidden_size + 256, config.hidden_size)
+        self.dense2 = nn.Linear(config.hidden_size, config.hidden_size)
         self.start_layer = nn.Sequential(
             self.dense2,
             nn.ReLU(),
             nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(512, config.num_labels),
+            nn.Linear(config.hidden_size, config.num_labels),
         )
         self.end_layer = nn.Sequential(
             self.dense2,
             nn.ReLU(),
             nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(512, config.num_labels),
+            nn.Linear(config.hidden_size, config.num_labels),
         )
         self.phrase_layer = nn.Sequential(
-            nn.Linear(1024, 512, bias=False),
+            nn.Linear(2 * config.hidden_size, config.hidden_size),
             nn.ReLU(),
             nn.Dropout(config.hidden_dropout_prob),
-            nn.Linear(512, config.num_labels),
+            nn.Linear(config.hidden_size, config.num_labels),
         )
 
         self.init_weights()
@@ -54,6 +56,8 @@ class BertExtractor(BertPreTrainedModel):
             attention_mask=None,
             token_type_ids=None,
             token_mapping=None,
+            pos_tag=None,
+            ner_tag=None,
             num_tokens=None,
             start_labels=None,
             end_labels=None,
@@ -76,14 +80,19 @@ class BertExtractor(BertPreTrainedModel):
         )
         sequence_output = outputs[0]  # (batch_size, max_seq_length, hidden_size)
 
-        # reconstruct sequence_output to token_embeddings with shape (batch_size, max_num_tokens, hidden_size)
+        # reconstruct sequence_output to token_embeddings
         expanded_token_mapping = token_mapping.unsqueeze(-1).repeat(1, 1, self.config.hidden_size)
         zeros = torch.zeros([batch_size, max_num_tokens, self.config.hidden_size], dtype=torch.float).to(self.device)
         token_embeddings = torch.scatter_add(zeros, 1, expanded_token_mapping, sequence_output)
         zeros = torch.zeros([batch_size, max_num_tokens], dtype=torch.long).to(self.device)
         token_counter = torch.scatter_add(zeros, 1, token_mapping, torch.ones_like(token_mapping))
         token_counter = torch.max(token_counter, torch.ones_like(token_counter))
-        token_embeddings = token_embeddings / token_counter.unsqueeze(-1)
+        token_embeddings = token_embeddings / token_counter.unsqueeze(-1)  # (batch_size, max_num_tokens, hidden_size)
+
+        # add feature embedding
+        pos_em = self.pos_embedding(pos_tag)
+        ner_em = self.ner_embedding(ner_tag)
+        token_embeddings = torch.cat([token_embeddings, pos_em, ner_em], dim=-1)
         token_embeddings = self.dense1(token_embeddings)  # (batch_size, max_num_tokens, 512)
 
         start_logits = self.start_layer(token_embeddings)  # (batch_size, max_num_tokens, 2)

@@ -23,7 +23,7 @@ def generate_batch_data(memory, src_index, tgt_index):
 
 
 class DependencyGNN(nn.Module):
-    def __init__(self, node_hidden_size, gnn_hidden_size, num_heads, dropout=0.1):
+    def __init__(self, node_hidden_size, gnn_hidden_size, num_heads, dropout=0.3):
         super(DependencyGNN, self).__init__()
 
         self.gnn1 = GATConv(node_hidden_size, gnn_hidden_size, num_heads, concat=False, dropout=dropout)
@@ -51,7 +51,7 @@ class DependencyGNN(nn.Module):
         memory = self.activation(memory)
         memory = self.gnn2(memory, edge_index)
         memory = self.activation(memory)
-        memory = self.gnn2(memory, edge_index)
+        memory = self.gnn3(memory, edge_index)
         node_embeddings = memory.view([batch_size, num_nodes, -1])
 
         return node_embeddings
