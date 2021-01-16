@@ -46,7 +46,7 @@ def convert_outputs(predicted_file, golden_file, output_file):
             labels.append(label)
 
     outputs = []
-    for i, line in tqdm(enumerate(read_json_lines(golden_file)), desc='Generating results'):
+    for i, line in tqdm(enumerate(read_json_lines(golden_file)), desc='Generating outputs'):
         context = line['context']
         token_spans = []
         for spans in line['token_spans']: token_spans.extend(spans)

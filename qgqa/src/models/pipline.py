@@ -5,7 +5,7 @@
 @Date               : 2020/10/14
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/11/11
+@Last modified date : 2021/1/15
 """
 
 from .generator import Generator
@@ -39,8 +39,8 @@ class Pipeline:
         self.generator = Generator(generator_model_name, cache_dir=cache_dir, device=device)
         self.reader = Reader(reader_model_name, cache_dir=cache_dir, device=device)
 
-    def __call__(self, input_data, beam_size=1, max_length=None, batch_size=8):
-        results = self.generator(input_data, beam_size=beam_size, max_length=max_length, batch_size=batch_size)
-        results = self.reader(results, max_length=max_length, batch_size=batch_size)
+    def __call__(self, input_data, max_length=None, batch_size=8, beam_size=1, temperature=1):
+        results = self.generator(input_data, max_length=max_length, batch_size=batch_size, beam_size=beam_size)
+        results = self.reader(results, max_length=max_length, batch_size=batch_size, temperature=temperature)
 
         return results

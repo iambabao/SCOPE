@@ -5,7 +5,7 @@
 @Date               : 2020/10/13
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2021/1/13
+@Last modified date : 2021/1/15
 """
 
 from tqdm import tqdm
@@ -46,7 +46,7 @@ class Generator:
         self.model.to(device)
         self.model.eval()
 
-    def __call__(self, input_data, beam_size=1, max_length=None, batch_size=8):
+    def __call__(self, input_data, max_length=None, batch_size=8, beam_size=1):
         all_ids_with_beam = []
         num_batches = (len(input_data) + batch_size - 1) // batch_size
         for step in tqdm(range(num_batches), desc='Generating questions'):

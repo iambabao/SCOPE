@@ -5,7 +5,7 @@
 @Date               : 2020/10/13
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2021/1/13
+@Last modified date : 2021/1/15
 """
 
 import argparse
@@ -22,7 +22,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_file", required=True, type=str, help="The input file")
     parser.add_argument("--output_file", required=True, type=str, help="The output file")
-    parser.add_argument("--beam_size", default=5, type=int, help="Number of questions to be generated")
     parser.add_argument(
         "--max_seq_length",
         default=None,
@@ -30,6 +29,8 @@ def main():
         help="The maximum total input sequence length after WordPiece tokenization",
     )
     parser.add_argument("--batch_size", default=8, type=int, help="Batch size per GPU/CPU")
+    parser.add_argument("--beam_size", default=5, type=int, help="Number of questions to be generated")
+    parser.add_argument("--temperature", default=1, type=int, help="Temperature in softmax")
     parser.add_argument(
         "--cache_dir",
         default="",
@@ -51,7 +52,7 @@ def main():
 
     logger.info('Running pipeline')
     data = list(read_json_lines(args.input_file))
-    results = pipeline(data, args.beam_size, args.max_seq_length, args.batch_size)
+    results = pipeline(data, args.max_seq_length, args.batch_size, args.beam_size, args.temperature)
     save_json(results, args.output_file)
 
 
