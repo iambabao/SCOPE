@@ -55,8 +55,8 @@ class Reader:
         self.model.to(device)
         self.model.eval()
 
-    def __call__(self, input_data, max_length=None, batch_size=8, temperature=1):
-        beam_size = len(input_data[0]['questions'])
+    def __call__(self, input_data, max_length=None, batch_size=8, temperature=1.0):
+        num_questions = len(input_data[0]['questions'])
 
         _input_data = []
         for entry in input_data:
@@ -99,14 +99,12 @@ class Reader:
             end_scores = torch.softmax(end_scores / temperature, dim=-1).detach().cpu().tolist()
 
             for i, (start_score, end_score, (start, end)) in enumerate(zip(start_scores, end_scores, answer_indices)):
-                if start == -1 or end == -1:
-                    all_scores.append((max(start_score), max(end_score)))
-                else:
-                    all_scores.append((start_score[start], end_score[end]))
+                if start == -1 or end == -1: all_scores.append(max(start_score) * max(end_score))
+                else: all_scores.append(start_score[start] * end_score[end])
 
         for i in range(len(input_data)):
-            start = i * beam_size
-            end = (i + 1) * beam_size
-            input_data[i]['scores'] = all_scores[start:end]
+            start = i * num_questions
+            end = (i + 1) * num_questions
+            input_data[i]['scores_q'] = all_scores[start:end]
 
         return input_data

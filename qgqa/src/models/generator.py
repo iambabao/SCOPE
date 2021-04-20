@@ -47,6 +47,7 @@ class Generator:
         self.model.eval()
 
     def __call__(self, input_data, max_length=None, batch_size=8, beam_size=1):
+        all_questions = []
         all_ids_with_beam = []
         num_batches = (len(input_data) + batch_size - 1) // batch_size
         for step in tqdm(range(num_batches), desc='Generating questions'):
@@ -72,10 +73,11 @@ class Generator:
                 inputs[key] = value.to(self.model.device)
 
             ids_with_beam = self.model.generate(num_beams=beam_size, num_return_sequences=beam_size, **inputs)
-            ids_with_beam = ids_with_beam.reshape([len(batch_text), beam_size, -1])
+            ids_with_beam = ids_with_beam.reshape([batch_end - batch_start, beam_size, -1])
             all_ids_with_beam.extend(ids_with_beam.detach().cpu().tolist())
+            all_questions.extend([self.tokenizer.batch_decode(ids, skip_special_tokens=True) for ids in ids_with_beam])
 
-        for i, ids_with_beam in tqdm(enumerate(all_ids_with_beam), desc='Decoding outputs'):
-            input_data[i]['questions'] = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in ids_with_beam]
+        for i, questions in enumerate(all_questions):
+            input_data[i]['questions'] = questions
 
         return input_data

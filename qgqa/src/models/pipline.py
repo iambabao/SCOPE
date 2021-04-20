@@ -39,7 +39,7 @@ class Pipeline:
         self.generator = Generator(generator_model_name, cache_dir=cache_dir, device=device)
         self.reader = Reader(reader_model_name, cache_dir=cache_dir, device=device)
 
-    def __call__(self, input_data, max_length=None, batch_size=8, beam_size=1, temperature=1):
+    def __call__(self, input_data, max_length=None, batch_size=8, beam_size=1, temperature=1.0):
         results = self.generator(input_data, max_length=max_length, batch_size=batch_size, beam_size=beam_size)
         results = self.reader(results, max_length=max_length, batch_size=batch_size, temperature=temperature)
 

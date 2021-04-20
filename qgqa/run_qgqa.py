@@ -30,7 +30,7 @@ def main():
     )
     parser.add_argument("--batch_size", default=8, type=int, help="Batch size per GPU/CPU")
     parser.add_argument("--beam_size", default=5, type=int, help="Number of questions to be generated")
-    parser.add_argument("--temperature", default=1, type=int, help="Temperature in softmax")
+    parser.add_argument("--temperature", default=1.0, type=float, help="Temperature in softmax")
     parser.add_argument(
         "--cache_dir",
         default="",
