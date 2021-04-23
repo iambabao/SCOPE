@@ -101,6 +101,7 @@ def train(args, data_processor, model, tokenizer, role):
 
     global_step = 0
     tr_loss, logging_loss = 0.0, 0.0
+    current_score, best_score = 0.0, 0.0
     set_seed(args.seed)  # Added here for reproductibility
     model.zero_grad()
     for _ in range(int(args.num_train_epochs)):
@@ -153,6 +154,7 @@ def train(args, data_processor, model, tokenizer, role):
                     # Only evaluate when single GPU otherwise metrics may not average well
                     if args.local_rank == -1 and args.evaluate_during_training:
                         results = evaluate(args, data_processor, model, tokenizer, role="eval", prefix=str(global_step))
+                        current_score, best_score = results["F1"], max(best_score, results["F1"])
                         for key, value in results.items():
                             tb_writer.add_scalar("eval_{}".format(key), value, global_step)
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
@@ -161,15 +163,22 @@ def train(args, data_processor, model, tokenizer, role):
 
                 # Save model checkpoint
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
-                    output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(global_step))
-                    if not os.path.exists(output_dir):
-                        os.makedirs(output_dir)
-                    # Take care of distributed/parallel training
-                    model_to_save = model.module if hasattr(model, "module") else model
-                    model_to_save.save_pretrained(output_dir)
-                    tokenizer.save_pretrained(output_dir)
-                    torch.save(args, os.path.join(output_dir, "training_args.bin"))
-                    logger.info("Saving model checkpoint to %s", output_dir)
+                    if args.save_best:
+                        if current_score >= best_score:
+                            logger.info("Saving model checkpoint to %s", args.output_dir)
+                            os.makedirs(args.output_dir, exist_ok=True)
+                            model_to_save = model.module if hasattr(model, "module") else model
+                            model_to_save.save_pretrained(args.output_dir)
+                            tokenizer.save_pretrained(args.output_dir)
+                            torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
+                    else:
+                        output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(global_step))
+                        os.makedirs(output_dir, exist_ok=True)
+                        logger.info("Saving model checkpoint to %s", output_dir)
+                        model_to_save = model.module if hasattr(model, "module") else model
+                        model_to_save.save_pretrained(output_dir)
+                        tokenizer.save_pretrained(output_dir)
+                        torch.save(args, os.path.join(output_dir, "training_args.bin"))
 
             if 0 < args.max_steps < global_step:
                 epoch_iterator.close()
@@ -179,6 +188,14 @@ def train(args, data_processor, model, tokenizer, role):
 
     if args.local_rank in [-1, 0]:
         tb_writer.close()
+
+        if not args.save_best:
+            logger.info("Saving model checkpoint to %s", args.output_dir)
+            os.makedirs(args.output_dir, exist_ok=True)
+            model_to_save = model.module if hasattr(model, "module") else model
+            model_to_save.save_pretrained(args.output_dir)
+            tokenizer.save_pretrained(args.output_dir)
+            torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
 
     return global_step, tr_loss / global_step
 
@@ -260,7 +277,7 @@ def main():
         "--do_lower_case", action="store_true", help="Set this flag if you are using an uncased model."
     )
     parser.add_argument("--loss_type", default="ce", type=str, choices=["ce", "pu"], help="The loss type.")
-    parser.add_argument("--prior", type=float, required=True, help="Estimated prior distribution for phrase.")
+    parser.add_argument("--prior", type=float, required=True, help="Estimated prior distribution.")
 
     # Directory parameters
     parser.add_argument(
@@ -295,6 +312,7 @@ def main():
     )
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
     parser.add_argument("--do_eval", action="store_true", help="Whether to run eval on the eval set.")
+    parser.add_argument("--save_best", action="store_true", help="Whether to save the best model .")
     parser.add_argument(
         "--evaluate_during_training", action="store_true", help="Rul evaluation during training at each logging step."
     )
@@ -452,19 +470,6 @@ def main():
     if args.do_train:
         global_step, tr_loss = train(args, data_processor, model, tokenizer, role="train")
         logger.info("global_step = %s, average loss = %s", global_step, tr_loss)
-
-    # Save the trained model and the tokenizer
-    if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        logger.info("Saving model checkpoint to %s", args.output_dir)
-        # Save a trained model, configuration and tokenizer using `save_pretrained()`.
-        # They can then be reloaded using `from_pretrained()`
-        # Take care of distributed/parallel training
-        model_to_save = model.module if hasattr(model, "module") else model
-        model_to_save.save_pretrained(args.output_dir)
-        tokenizer.save_pretrained(args.output_dir)
-
-        # Good practice: save your training arguments together with the trained model
-        torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
 
     # Evaluation - we can ask to evaluate all the checkpoints (sub-directories) in a directory
     results = {}
