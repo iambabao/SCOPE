@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2021/1/13
+@Last modified date : 2021/4/25
 """
 
 import os
@@ -18,7 +18,7 @@ from tqdm import tqdm
 from scipy.sparse import coo_matrix, vstack
 from torch.utils.data import TensorDataset
 
-from src.utils import read_json_lines, pad_list, pad_batch
+from src.utils import read_json_lines, pad_list
 
 logger = logging.getLogger(__name__)
 
