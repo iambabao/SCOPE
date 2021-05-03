@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2021/4/25
+@Last modified date : 2021/5/2
 """
 
 import argparse
@@ -32,6 +32,7 @@ except ImportError:
 
 MODEL_MAPPING = {
     'bert': BertExtractor,
+    'roberta': RobertaExtractor,
 }
 
 logger = logging.getLogger(__name__)
@@ -298,7 +299,12 @@ def main():
         type=str,
         help="Where do you want to store the pre-trained models downloaded from s3",
     )
-    parser.add_argument("--log_file", default=None, type=str, help="Log file.")
+    parser.add_argument(
+        "--log_dir",
+        default=None,
+        type=str,
+        help="The log directory where the running details will be written.",
+    )
 
     # Other parameters
     parser.add_argument(
@@ -373,6 +379,17 @@ def main():
     parser.add_argument("--server_port", type=str, default="", help="Can be used for distant debugging.")
     args = parser.parse_args()
 
+    # Setup output dir
+    args.output_dir = os.path.join(
+            args.output_dir,
+            "{}_{}_{}_{}_{:.2f}".format(
+                args.model_type,
+                list(filter(None, args.model_name_or_path.split("/"))).pop(),
+                args.max_seq_length,
+                args.loss_type,
+                args.prior,
+            ),
+        )
     if (
         os.path.exists(args.output_dir)
         and os.listdir(args.output_dir)
@@ -406,7 +423,21 @@ def main():
         args.n_gpu = 1
     args.device = device
 
-    # Setup logging
+    # Setup log dir
+    if args.log_dir is not None:
+        os.makedirs(args.log_dir, exist_ok=True)
+        args.log_file = os.path.join(
+            args.log_dir,
+            "{}_{}_{}_{}_{:.2f}.txt".format(
+                args.model_type,
+                list(filter(None, args.model_name_or_path.split("/"))).pop(),
+                args.max_seq_length,
+                args.loss_type,
+                args.prior,
+            ),
+        )
+    else:
+        args.log_file = None
     init_logger(logging.INFO if args.local_rank in [-1, 0] else logging.WARN, args.log_file)
     logger.warning(
         "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
@@ -421,7 +452,6 @@ def main():
     set_seed(args.seed)
 
     # Load pretrained model and tokenizer
-    args.model_type = args.model_type.lower()
     model_class = MODEL_MAPPING[args.model_type]
     data_processor = DataProcessor(
         args.model_type,

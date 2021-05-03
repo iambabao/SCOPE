@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2021/4/25
+@Last modified date : 2021/5/1
 """
 
 import os
@@ -156,7 +156,7 @@ class DataProcessor:
             "cached_feature_{}_{}_{}".format(
                 role,
                 list(filter(None, self.model_name_or_path.split("/"))).pop(),
-                str(self.max_seq_length),
+                self.max_seq_length,
             ),
         )
         if os.path.exists(cached_features) and not self.overwrite_cache:
