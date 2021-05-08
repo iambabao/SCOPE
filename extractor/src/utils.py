@@ -5,13 +5,12 @@
 @Date               : 2020/1/1
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2021/1/13
+@Last modified date : 2021/5/8
 """
 
 import json
 import random
 import logging
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -153,14 +152,13 @@ def make_batch_iter(data, batch_size, shuffle):
 
 
 # ====================
-def generate_outputs(start_predicted, end_predicted, phrase_predicted):
+def generate_outputs(phrase_predicted):
     outputs = []
-    for start_flags, end_flags, phrase_flags in zip(start_predicted, end_predicted, phrase_predicted):
+    for phrase_flags in phrase_predicted:
         predicted_spans = []
-        for i, is_start in enumerate(start_flags):
-            if not is_start: continue
-            for j, is_end in enumerate(end_flags):
-                if not is_end: continue
+        rows, cols = phrase_flags.shape
+        for i in range(rows):
+            for j in range(cols):
                 if phrase_flags[i][j]:
                     predicted_spans.append((i, j))
         outputs.append(predicted_spans)
