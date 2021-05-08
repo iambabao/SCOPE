@@ -5,13 +5,14 @@
 @Date               : 2020/1/1
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2021/4/25
+@Last modified date : 2020/4/25
 """
 
 import json
 import random
 import logging
 import numpy as np
+from sklearn.metrics import precision_recall_fscore_support
 
 logger = logging.getLogger(__name__)
 
@@ -152,80 +153,39 @@ def make_batch_iter(data, batch_size, shuffle):
         yield data[start_index:end_index]
 
 
-def load_glove_embedding(data_file, word_list):
-    w2v = {}
-    with open(data_file, 'r', encoding='utf-8') as fin:
-        line = fin.readline()
-        embedding_size = len(line.strip().split()) - 1
-        while line and line != '':
-            line = line.strip().split()
-            if len(line) == embedding_size + 1:
-                word = line[0]
-                vector = [float(val) for val in line[1:]]
-                if word in word_list:
-                    w2v[word] = vector
-            line = fin.readline()
-    logger.info('hit words: {}'.format(len(w2v)))
-
-    embedding_matrix = []
-    for word in word_list:
-        if word in w2v:
-            embedding_matrix.append(w2v[word])
-        else:
-            embedding_matrix.append([0.0] * embedding_size)
-    return np.array(embedding_matrix), embedding_size
-
-
 # ====================
-def generate_outputs(phrase_predicted):
+def compute_metrics(input_ids, phrase_labels, start_predicted, end_predicted, phrase_predicted, tokenizer):
     outputs = []
-    for phrase_flags in phrase_predicted:
-        predicted_spans = []
-        rows, cols = phrase_flags.shape
-        for i in range(rows):
-            for j in range(cols):
-                if phrase_flags[i][j]:
-                    predicted_spans.append((i, j))
-        outputs.append(predicted_spans)
-    return outputs
-
-
-def refine_outputs(examples, outputs):
-    refined_outputs = []
-    for example, predicted_spans in zip(examples, outputs):
-        context = example.context
-        token_spans = example.token_spans
-        golden = [
-            (context[token_spans[start][1]:token_spans[end][2]], token_spans[start][1], token_spans[end][2])
-            for phrase, start, end in example.phrase_spans
-        ]
-        predicted = [
-            (context[token_spans[start][1]:token_spans[end][2]], token_spans[start][1], token_spans[end][2])
-            for start, end in predicted_spans
-        ]
-        refined_outputs.append({'context': context, 'golden': golden, 'predicted': predicted})
-    return refined_outputs
-
-
-def compute_metrics(outputs):
-    results = {'Golden': 0, 'Predicted': 0, 'Matched': 0}
-    for item in outputs:
-        golden = set([(v[1], v[2]) for v in item['golden']])
-        predicted = set([(v[1], v[2]) for v in item['predicted']])
-        results['Golden'] += len(golden)
-        results['Predicted'] += len(predicted)
-        results['Matched'] += len(golden & predicted)
+    results = {'Golden': 0, 'Predicted': 0, 'Match': 0}
+    for ids, labels, start_flags, end_flags, phrase_flags in zip(
+            input_ids, phrase_labels, start_predicted, end_predicted, phrase_predicted
+    ):
+        item = {'context': tokenizer.decode(ids, skip_special_tokens=True), 'golden': [], 'predicted': []}
+        for i in range(labels.shape[0]):
+            for j in range(i, labels.shape[1]):
+                if labels[i][j] == 1:
+                    item['golden'].append(tokenizer.decode(ids[i:j + 1], skip_special_tokens=True))
+        for i, is_start in enumerate(start_flags):
+            if not is_start: continue
+            for j, is_end in enumerate(end_flags):
+                if not is_end: continue
+                if phrase_flags[i][j] == 1:
+                    item['predicted'].append(tokenizer.decode(ids[i:j + 1], skip_special_tokens=True))
+        outputs.append(item)
+        results['Golden'] += len(set(item['golden']))
+        results['Predicted'] += len(set(item['predicted']))
+        results['Match'] += len(set(item['golden']) & set(item['predicted']))
     if results['Golden'] == 0:
         if results['Predicted'] == 0:
             results['Precision'] = results['Recall'] = results['F1'] = 1.0
         else:
             results['Precision'] = results['Recall'] = results['F1'] = 0.0
     else:
-        if results['Matched'] == 0 or results['Predicted'] == 0:
+        if results['Match'] == 0 or results['Predicted'] == 0:
             results['Precision'] = results['Recall'] = results['F1'] = 0.0
         else:
-            results['Precision'] = results['Matched'] / results['Predicted']
-            results['Recall'] = results['Matched'] / results['Golden']
+            results['Precision'] = results['Match'] / results['Predicted']
+            results['Recall'] = results['Match'] / results['Golden']
             results['F1'] = 2 * results['Precision'] * results['Recall'] / (results['Precision'] + results['Recall'])
-    results['average'] = sum([len(item['predicted']) for item in outputs]) / len(outputs)
-    return results
+
+    return outputs, results

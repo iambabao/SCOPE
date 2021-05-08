@@ -152,15 +152,4 @@ def make_batch_iter(data, batch_size, shuffle):
         yield data[start_index:end_index]
 
 
-def cosine_similarity(v1, v2):
-    r = 0
-    s1 = 0.0
-    s2 = 0.0
-    for x, y in zip(v1, v2):
-        r += x * y
-        s1 += x * x
-        s2 += y * y
-    return r / (math.sqrt(s1) * math.sqrt(s2) + 1e-10)
-
-
 # ====================

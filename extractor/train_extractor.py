@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2021/1/13
+@Last modified date : 2021/5/8
 """
 
 import argparse
@@ -32,6 +32,7 @@ except ImportError:
 
 MODEL_MAPPING = {
     'bert': BertExtractor,
+    'roberta': RobertaExtractor,
     'bert-gnn': BertGNNExtractor,
 }
 
@@ -102,6 +103,7 @@ def train(args, data_processor, model, tokenizer, role):
 
     global_step = 0
     tr_loss, logging_loss = 0.0, 0.0
+    current_score, best_score = 0.0, 0.0
     set_seed(args.seed)  # Added here for reproductibility
     model.zero_grad()
     for _ in range(int(args.num_train_epochs)):
@@ -113,10 +115,7 @@ def train(args, data_processor, model, tokenizer, role):
                 "attention_mask": batch[1].to(args.device),
                 "token_mapping": batch[3].to(args.device),
                 "pos_tag": batch[4].to(args.device),
-                "ner_tag": batch[5].to(args.device),
-                "num_tokens": batch[8].to(args.device),
-                "start_labels": batch[-3].to(args.device),
-                "end_labels": batch[-2].to(args.device),
+                "num_tokens": batch[5].to(args.device),
                 "phrase_labels": batch[-1].to_dense().to(args.device),
             }
             # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use token_type_ids
@@ -128,9 +127,6 @@ def train(args, data_processor, model, tokenizer, role):
 
             outputs = model(**inputs)
             loss = outputs[0]
-
-            description = "Global step: {:>6d}, Loss: {:>.4f}".format(global_step, loss.item())
-            epoch_iterator.set_description(description)
 
             if args.n_gpu > 1:
                 loss = loss.mean()  # mean() to average on multi-gpu parallel (not distributed) training
@@ -144,6 +140,8 @@ def train(args, data_processor, model, tokenizer, role):
                 loss.backward()
 
             tr_loss += loss.item()
+            description = "Global step: {:>6d}, Loss: {:>.4f}".format(global_step, loss.item())
+            epoch_iterator.set_description(description)
             if (step + 1) % args.gradient_accumulation_steps == 0:
                 if args.fp16:
                     torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
@@ -160,6 +158,7 @@ def train(args, data_processor, model, tokenizer, role):
                     # Only evaluate when single GPU otherwise metrics may not average well
                     if args.local_rank == -1 and args.evaluate_during_training:
                         results = evaluate(args, data_processor, model, tokenizer, role="eval", prefix=str(global_step))
+                        current_score, best_score = results["F1"], max(best_score, results["F1"])
                         for key, value in results.items():
                             tb_writer.add_scalar("eval_{}".format(key), value, global_step)
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
@@ -168,15 +167,22 @@ def train(args, data_processor, model, tokenizer, role):
 
                 # Save model checkpoint
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
-                    output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(global_step))
-                    if not os.path.exists(output_dir):
-                        os.makedirs(output_dir)
-                    # Take care of distributed/parallel training
-                    model_to_save = model.module if hasattr(model, "module") else model
-                    model_to_save.save_pretrained(output_dir)
-                    tokenizer.save_pretrained(output_dir)
-                    torch.save(args, os.path.join(output_dir, "training_args.bin"))
-                    logger.info("Saving model checkpoint to %s", output_dir)
+                    if args.save_best:
+                        if current_score >= best_score:
+                            logger.info("Saving model checkpoint to %s", args.output_dir)
+                            os.makedirs(args.output_dir, exist_ok=True)
+                            model_to_save = model.module if hasattr(model, "module") else model
+                            model_to_save.save_pretrained(args.output_dir)
+                            tokenizer.save_pretrained(args.output_dir)
+                            torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
+                    else:
+                        output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(global_step))
+                        os.makedirs(output_dir, exist_ok=True)
+                        logger.info("Saving model checkpoint to %s", output_dir)
+                        model_to_save = model.module if hasattr(model, "module") else model
+                        model_to_save.save_pretrained(output_dir)
+                        tokenizer.save_pretrained(output_dir)
+                        torch.save(args, os.path.join(output_dir, "training_args.bin"))
 
             if 0 < args.max_steps < global_step:
                 epoch_iterator.close()
@@ -186,6 +192,14 @@ def train(args, data_processor, model, tokenizer, role):
 
     if args.local_rank in [-1, 0]:
         tb_writer.close()
+
+        if not args.save_best:
+            logger.info("Saving model checkpoint to %s", args.output_dir)
+            os.makedirs(args.output_dir, exist_ok=True)
+            model_to_save = model.module if hasattr(model, "module") else model
+            model_to_save.save_pretrained(args.output_dir)
+            tokenizer.save_pretrained(args.output_dir)
+            torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
 
     return global_step, tr_loss / global_step
 
@@ -218,10 +232,7 @@ def evaluate(args, data_processor, model, tokenizer, role, prefix=""):
                 "attention_mask": batch[1].to(args.device),
                 "token_mapping": batch[3].to(args.device),
                 "pos_tag": batch[4].to(args.device),
-                "ner_tag": batch[5].to(args.device),
-                "num_tokens": batch[8].to(args.device),
-                "start_labels": batch[-3].to(args.device),
-                "end_labels": batch[-2].to(args.device),
+                "num_tokens": batch[5].to(args.device),
                 "phrase_labels": batch[-1].to_dense().to(args.device),
             }
             # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use token_type_ids
@@ -232,12 +243,10 @@ def evaluate(args, data_processor, model, tokenizer, role, prefix=""):
                 inputs["tgt_index"] = batch[7].to(args.device)
 
             outputs = model(**inputs)
-            phrase_logits, start_logits, end_logits = outputs[1], outputs[2], outputs[3]
+            phrase_logits = outputs[1]
 
-            start_predicted = np.argmax(start_logits.detach().cpu().numpy(), axis=-1)
-            end_predicted = np.argmax(end_logits.detach().cpu().numpy(), axis=-1)
             phrase_predicted = np.argmax(phrase_logits.detach().cpu().numpy(), axis=-1)
-            eval_outputs.extend(generate_outputs(start_predicted, end_predicted, phrase_predicted))
+            eval_outputs.extend(generate_outputs(phrase_predicted))
     eval_outputs = refine_outputs(examples, eval_outputs)
     eval_outputs_file = os.path.join(output_dir, "{}_outputs.json".format(role))
     save_json_lines(eval_outputs, eval_outputs_file)
@@ -275,8 +284,7 @@ def main():
         "--do_lower_case", action="store_true", help="Set this flag if you are using an uncased model."
     )
     parser.add_argument("--loss_type", default="ce", type=str, choices=["ce", "pu"], help="The loss type.")
-    parser.add_argument("--prior_token", type=float, required=True, help="Estimated prior distribution for token.")
-    parser.add_argument("--prior_phrase", type=float, required=True, help="Estimated prior distribution for phrase.")
+    parser.add_argument("--prior", default=0.00, type=float, help="Estimated prior distribution.")
 
     # Directory parameters
     parser.add_argument(
@@ -297,7 +305,12 @@ def main():
         type=str,
         help="Where do you want to store the pre-trained models downloaded from s3",
     )
-    parser.add_argument("--log_file", default=None, type=str, help="Log file.")
+    parser.add_argument(
+        "--log_dir",
+        default=None,
+        type=str,
+        help="The log directory where the running details will be written.",
+    )
 
     # Other parameters
     parser.add_argument(
@@ -311,6 +324,7 @@ def main():
     )
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
     parser.add_argument("--do_eval", action="store_true", help="Whether to run eval on the eval set.")
+    parser.add_argument("--save_best", action="store_true", help="Whether to save the best model .")
     parser.add_argument(
         "--evaluate_during_training", action="store_true", help="Rul evaluation during training at each logging step."
     )
@@ -371,6 +385,19 @@ def main():
     parser.add_argument("--server_port", type=str, default="", help="Can be used for distant debugging.")
     args = parser.parse_args()
 
+    # Setup output dir
+    if args.do_train:
+        args.output_dir = os.path.join(
+                args.output_dir,
+                "{}_{}_{}_{}_{:.2f}_{:.1e}".format(
+                    args.model_type,
+                    list(filter(None, args.model_name_or_path.split("/"))).pop(),
+                    args.max_seq_length,
+                    args.loss_type,
+                    args.prior,
+                    args.learning_rate,
+                ),
+            )
     if (
         os.path.exists(args.output_dir)
         and os.listdir(args.output_dir)
@@ -404,7 +431,22 @@ def main():
         args.n_gpu = 1
     args.device = device
 
-    # Setup logging
+    # Setup log dir
+    if args.log_dir is not None:
+        os.makedirs(args.log_dir, exist_ok=True)
+        args.log_file = os.path.join(
+            args.log_dir,
+            "{}_{}_{}_{}_{:.2f}_{:.1e}.txt".format(
+                args.model_type,
+                list(filter(None, args.model_name_or_path.split("/"))).pop(),
+                args.max_seq_length,
+                args.loss_type,
+                args.prior,
+                args.learning_rate,
+            ),
+        )
+    else:
+        args.log_file = None
     init_logger(logging.INFO if args.local_rank in [-1, 0] else logging.WARN, args.log_file)
     logger.warning(
         "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
@@ -419,7 +461,6 @@ def main():
     set_seed(args.seed)
 
     # Load pretrained model and tokenizer
-    args.model_type = args.model_type.lower()
     model_class = MODEL_MAPPING[args.model_type]
     data_processor = DataProcessor(
         args.model_type,
@@ -446,8 +487,7 @@ def main():
         config=config,
         cache_dir=args.cache_dir if args.cache_dir else None,
         loss_type=args.loss_type,
-        prior_token=args.prior_token,
-        prior_phrase=args.prior_phrase,
+        prior=args.prior,
     )
     model.to(args.device)
 
@@ -470,19 +510,6 @@ def main():
         global_step, tr_loss = train(args, data_processor, model, tokenizer, role="train")
         logger.info("global_step = %s, average loss = %s", global_step, tr_loss)
 
-    # Save the trained model and the tokenizer
-    if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        logger.info("Saving model checkpoint to %s", args.output_dir)
-        # Save a trained model, configuration and tokenizer using `save_pretrained()`.
-        # They can then be reloaded using `from_pretrained()`
-        # Take care of distributed/parallel training
-        model_to_save = model.module if hasattr(model, "module") else model
-        model_to_save.save_pretrained(args.output_dir)
-        tokenizer.save_pretrained(args.output_dir)
-
-        # Good practice: save your training arguments together with the trained model
-        torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
-
     # Evaluation - we can ask to evaluate all the checkpoints (sub-directories) in a directory
     results = {}
     if args.do_eval and args.local_rank in [-1, 0]:
@@ -504,8 +531,7 @@ def main():
             model = model_class.from_pretrained(
                 checkpoint,
                 loss_type=args.loss_type,
-                prior_token=args.prior_token,
-                prior_phrase=args.prior_phrase,
+                prior=args.prior,
             )
             model.to(args.device)
 

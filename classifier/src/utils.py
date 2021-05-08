@@ -5,7 +5,7 @@
 @Date               : 2020/1/1
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2020/4/25
+@Last modified date : 2021/1/18
 """
 
 import json
@@ -178,38 +178,23 @@ def load_glove_embedding(data_file, word_list):
 
 
 # ====================
-def compute_metrics(input_ids, phrase_labels, start_predicted, end_predicted, phrase_predicted, tokenizer):
-    outputs = []
-    results = {'Golden': 0, 'Predicted': 0, 'Match': 0}
-    for ids, labels, start_flags, end_flags, phrase_flags in zip(
-            input_ids, phrase_labels, start_predicted, end_predicted, phrase_predicted
-    ):
-        item = {'context': tokenizer.decode(ids, skip_special_tokens=True), 'golden': [], 'predicted': []}
-        for i in range(labels.shape[0]):
-            for j in range(i, labels.shape[1]):
-                if labels[i][j] == 1:
-                    item['golden'].append(tokenizer.decode(ids[i:j + 1], skip_special_tokens=True))
-        for i, is_start in enumerate(start_flags):
-            if not is_start: continue
-            for j, is_end in enumerate(end_flags):
-                if not is_end: continue
-                if phrase_flags[i][j] == 1:
-                    item['predicted'].append(tokenizer.decode(ids[i:j + 1], skip_special_tokens=True))
-        outputs.append(item)
-        results['Golden'] += len(set(item['golden']))
-        results['Predicted'] += len(set(item['predicted']))
-        results['Match'] += len(set(item['golden']) & set(item['predicted']))
-    if results['Golden'] == 0:
-        if results['Predicted'] == 0:
-            results['Precision'] = results['Recall'] = results['F1'] = 1.0
-        else:
-            results['Precision'] = results['Recall'] = results['F1'] = 0.0
-    else:
-        if results['Match'] == 0 or results['Predicted'] == 0:
-            results['Precision'] = results['Recall'] = results['F1'] = 0.0
-        else:
-            results['Precision'] = results['Match'] / results['Predicted']
-            results['Recall'] = results['Match'] / results['Golden']
-            results['F1'] = 2 * results['Precision'] * results['Recall'] / (results['Precision'] + results['Recall'])
+def generate_outputs(labels, logits):
+    predictions = np.argmax(logits, axis=-1)
+    assert len(labels) == len(predictions)
 
-    return outputs, results
+    outputs = [{'label': int(u), 'prediction': int(v)} for u, v in zip(labels, predictions)]
+
+    return outputs
+
+
+def compute_metrics(outputs):
+    labels = [v['label'] for v in outputs]
+    predictions = [v['prediction'] for v in outputs]
+
+    results = {}
+    p, r, f, _ = precision_recall_fscore_support(labels, predictions, average='binary')
+    results['Micro P'] = p
+    results['Micro R'] = r
+    results['Micro F'] = f
+
+    return results

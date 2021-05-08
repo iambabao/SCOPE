@@ -5,7 +5,7 @@
 @Date               : 2020/12/9
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2021/1/4
+@Last modified date : 2021/5/8
 """
 
 import torch
@@ -23,35 +23,35 @@ def generate_batch_data(memory, src_index, tgt_index):
 
 
 class DependencyGNN(nn.Module):
-    def __init__(self, node_hidden_size, gnn_hidden_size, num_heads, dropout=0.3):
+    def __init__(self, hidden_size, num_heads=1, dropout=0.3):
         super(DependencyGNN, self).__init__()
 
-        self.gnn1 = GATConv(node_hidden_size, gnn_hidden_size, num_heads, concat=False, dropout=dropout)
-        self.gnn2 = GATConv(node_hidden_size, gnn_hidden_size, num_heads, concat=False, dropout=dropout)
-        self.gnn3 = GATConv(node_hidden_size, gnn_hidden_size, num_heads, concat=False, dropout=dropout)
-        self.activation = torch.nn.ELU()
+        self.gnn1 = GATConv(hidden_size, hidden_size, num_heads, concat=False, dropout=dropout)
+        self.gnn2 = GATConv(hidden_size, hidden_size, num_heads, concat=False, dropout=dropout)
+        self.gnn3 = GATConv(hidden_size, hidden_size, num_heads, concat=False, dropout=dropout)
+        self.activation1 = torch.nn.ELU()
+        self.activation2 = torch.nn.ELU()
 
     def forward(self, node_embeddings, src_index, tgt_index):
         """
 
         Args:
-            node_embeddings: (batch_size, num_nodes, node_hidden_size)
+            node_embeddings: (batch_size, num_nodes, hidden_size)
             src_index: (batch_size, num_edges)
             tgt_index: (batch_size, num_edges)
 
         Returns:
-            output_embeddings: (batch_size, num_nodes, gnn_hidden_size)
+            output_embeddings: (batch_size, num_nodes, hidden_size)
         """
 
-        batch_size = node_embeddings.shape[0]
-        num_nodes = node_embeddings.shape[1]
+        batch_size, num_nodes, hidden_size = node_embeddings.shape
 
         memory, edge_index = generate_batch_data(node_embeddings, src_index, tgt_index)
         memory = self.gnn1(memory, edge_index)
-        memory = self.activation(memory)
+        memory = self.activation1(memory)
         memory = self.gnn2(memory, edge_index)
-        memory = self.activation(memory)
+        memory = self.activation2(memory)
         memory = self.gnn3(memory, edge_index)
-        node_embeddings = memory.view([batch_size, num_nodes, -1])
+        node_embeddings = memory.view([batch_size, num_nodes, hidden_size])
 
         return node_embeddings

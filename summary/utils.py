@@ -152,28 +152,4 @@ def make_batch_iter(data, batch_size, shuffle):
         yield data[start_index:end_index]
 
 
-def load_glove_embedding(data_file, word_list):
-    w2v = {}
-    with open(data_file, 'r', encoding='utf-8') as fin:
-        line = fin.readline()
-        embedding_size = len(line.strip().split()) - 1
-        while line and line != '':
-            line = line.strip().split()
-            if len(line) == embedding_size + 1:
-                word = line[0]
-                vector = [float(val) for val in line[1:]]
-                if word in word_list:
-                    w2v[word] = vector
-            line = fin.readline()
-    logger.info('hit words: {}'.format(len(w2v)))
-
-    embedding_matrix = []
-    for word in word_list:
-        if word in w2v:
-            embedding_matrix.append(w2v[word])
-        else:
-            embedding_matrix.append([0.0] * embedding_size)
-    return np.array(embedding_matrix), embedding_size
-
-
 # ====================
