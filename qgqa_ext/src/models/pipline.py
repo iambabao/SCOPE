@@ -5,7 +5,7 @@
 @Date               : 2020/10/14
 @Desc               :
 @Last modified by   : Bao
-@Last modified date : 2021/1/15
+@Last modified date : 2021/5/11
 """
 
 from .generator import Generator
@@ -26,7 +26,7 @@ class Pipeline:
         ]
         pipeline = Pipeline(
             generator_model_name='valhalla/t5-base-qg-hl',
-            reader_model_name='deepset/bert-base-cased-squad2',
+            reader_model_name='deepset/roberta-large-squad2',
             cache_dir='your_cache_dir',
             device='cuda' if torch.cuda.is_available() else 'cpu',
         )
@@ -39,8 +39,8 @@ class Pipeline:
         self.generator = Generator(generator_model_name, cache_dir=cache_dir, device=device)
         self.reader = Reader(reader_model_name, cache_dir=cache_dir, device=device)
 
-    def __call__(self, input_data, max_length=None, batch_size=8, beam_size=1, temperature=1.0):
-        results = self.generator(input_data, max_length=max_length, batch_size=batch_size, beam_size=beam_size)
-        results = self.reader(results, max_length=max_length, batch_size=batch_size, temperature=temperature)
+    def __call__(self, input_data, max_seq_length=None, batch_size=8, beam_size=1, temperature=1.0):
+        results = self.generator(input_data, max_seq_length=max_seq_length, batch_size=batch_size, beam_size=beam_size)
+        results = self.reader(results, max_seq_length=max_seq_length, batch_size=batch_size, temperature=temperature)
 
         return results

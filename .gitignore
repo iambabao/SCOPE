@@ -3,6 +3,16 @@
 .DS_Store
 /**/data/
 /**/checkpoints/
+/**/outputs/
+/**/outputs_train/
+/**/outputs_dev/
+/**/outputs_eval/
+/**/outputs_test/
+/**/results/
+/**/results_train/
+/**/results_dev/
+/**/results_eval/
+/**/results_test/
 /**/temp/
 temp.*
 *.temp.*

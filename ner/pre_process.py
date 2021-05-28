@@ -16,7 +16,10 @@ from utils import init_logger, read_json_lines
 logger = logging.getLogger(__name__)
 
 
-def convert_data(filein, fileout):
+def convert_data(data_type, role):
+    filein = '../data/{}/data_{}.feature.json'.format(data_type, role)
+    fileout = '../data/{}_NER/data_{}.txt'.format(data_type, role)
+
     fp = open(fileout, 'w', encoding='utf-8')
     for entry in tqdm(list(read_json_lines(filein)), desc='Converting data'):
         tokens = []
@@ -36,7 +39,10 @@ def convert_data(filein, fileout):
         print('', file=fp)
 
 
-def convert_data_nested(filein, fileout, max_num_nested):
+def convert_data_nested(data_type, role, max_num_nested):
+    filein = '../data/{}/data_{}.feature.json'.format(data_type, role)
+    fileout = '../data/{}_NER/data_{}.nested.txt'.format(data_type, role)
+
     token2tag = []
     for entry in tqdm(list(read_json_lines(filein)), desc='Converting data'):
         tokens = []
@@ -75,13 +81,15 @@ def convert_data_nested(filein, fileout, max_num_nested):
 def main():
     init_logger(logging.INFO)
 
-    convert_data('../data/phrase/data_train.feature.json', '../data/ner/data_train.txt')
-    convert_data('../data/phrase/data_eval.feature.json', '../data/ner/data_eval.txt')
-    convert_data('../data/phrase/data_test.feature.json', '../data/ner/data_test.txt')
+    for data_type in ['SQuAD', 'DROP']:
+        for role in ['train', 'eval', 'test']:
+            convert_data(data_type, role)
+            convert_data(data_type, role)
+            convert_data(data_type, role)
 
-    convert_data_nested('../data/phrase/data_train.feature.json', '../data/ner/data_train.nested.txt', max_num_nested=4)
-    convert_data_nested('../data/phrase/data_eval.feature.json', '../data/ner/data_eval.nested.txt', max_num_nested=4)
-    convert_data_nested('../data/phrase/data_test.feature.json', '../data/ner/data_test.nested.txt', max_num_nested=4)
+            convert_data_nested(data_type, role, max_num_nested=4)
+            convert_data_nested(data_type, role, max_num_nested=4)
+            convert_data_nested(data_type, role, max_num_nested=4)
 
 
 if __name__ == '__main__':

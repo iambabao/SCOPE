@@ -43,7 +43,13 @@ def main():
     init_logger(logging.INFO)
 
     logger.info('Loading data')
-    input_data = list(read_json_lines(args.input_file))
+    input_data = []
+    for entry in read_json_lines(args.input_file):
+        golden_answers = entry['golden']
+        predicted_answers = entry['predicted']
+        for answer in predicted_answers:
+            input_data.append({'context': entry['context'], 'answer': answer, 'exists': answer in golden_answers})
+    logger.info('Number of answers: {}'.format(len(input_data)))
 
     logger.info('Initializing pipeline')
     pipeline = Pipeline(

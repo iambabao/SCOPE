@@ -12,7 +12,6 @@ import json
 import random
 import logging
 import numpy as np
-from sklearn.metrics import precision_recall_fscore_support
 
 logger = logging.getLogger(__name__)
 
@@ -178,23 +177,40 @@ def load_glove_embedding(data_file, word_list):
 
 
 # ====================
-def generate_outputs(labels, logits):
-    predictions = np.argmax(logits, axis=-1)
-    assert len(labels) == len(predictions)
-
-    outputs = [{'label': int(u), 'prediction': int(v)} for u, v in zip(labels, predictions)]
+def generate_outputs(predictions, num_phrases):
+    outputs = [u[:v] for u, v in zip(predictions, num_phrases)]
 
     return outputs
 
 
+def refine_outputs(examples, outputs):
+    refined_outputs = []
+    for example, predictions in zip(examples, outputs):
+        golden = example.golden
+        predicted = [u for u, v in zip(example.phrases, predictions) if v == 1]
+        refined_outputs.append({'context': example.context, 'golden': golden, 'predicted': predicted})
+    return refined_outputs
+
+
 def compute_metrics(outputs):
-    labels = [v['label'] for v in outputs]
-    predictions = [v['prediction'] for v in outputs]
-
-    results = {}
-    p, r, f, _ = precision_recall_fscore_support(labels, predictions, average='binary')
-    results['Micro P'] = p
-    results['Micro R'] = r
-    results['Micro F'] = f
-
+    results = {'Golden': 0, 'Predicted': 0, 'Matched': 0}
+    for item in outputs:
+        golden = set([(v[1], v[2]) for v in item['golden']])
+        predicted = set([(v[1], v[2]) for v in item['predicted']])
+        results['Golden'] += len(golden)
+        results['Predicted'] += len(predicted)
+        results['Matched'] += len(golden & predicted)
+    if results['Golden'] == 0:
+        if results['Predicted'] == 0:
+            results['Precision'] = results['Recall'] = results['F1'] = 1.0
+        else:
+            results['Precision'] = results['Recall'] = results['F1'] = 0.0
+    else:
+        if results['Matched'] == 0 or results['Predicted'] == 0:
+            results['Precision'] = results['Recall'] = results['F1'] = 0.0
+        else:
+            results['Precision'] = results['Matched'] / results['Predicted']
+            results['Recall'] = results['Matched'] / results['Golden']
+            results['F1'] = 2 * results['Precision'] * results['Recall'] / (results['Precision'] + results['Recall'])
+    results['average'] = sum([len(item['predicted']) for item in outputs]) / len(outputs)
     return results

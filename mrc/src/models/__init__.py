@@ -5,8 +5,8 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2021/1/18
+@Last modified date : 2021/5/8
 """
 
-from .bert import BertClassifier
-from .roberta import RobertaClassifier
+from .bert import BertExtractor
+from .roberta import RobertaExtractor

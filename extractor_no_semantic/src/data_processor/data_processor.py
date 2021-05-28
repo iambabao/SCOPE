@@ -5,7 +5,7 @@
 @Date               : 2020/7/26
 @Desc               : 
 @Last modified by   : Bao
-@Last modified date : 2021/1/18
+@Last modified date : 2021/5/8
 """
 
 import os
@@ -13,21 +13,29 @@ import copy
 import json
 import torch
 import logging
+import numpy as np
 from tqdm import tqdm
+from scipy.sparse import coo_matrix, vstack
 from torch.utils.data import TensorDataset
 
-from src.utils import read_json_lines, pad_list
+from src.utils import read_json_lines, pad_list, pad_batch
 
 logger = logging.getLogger(__name__)
 
+NUM_SET = [8]  # ['NUM']
+VERB_SET = [15]  # ['VERB']
+NOUN_SET = [7, 10, 11]  # ['NOUN', 'PRON', 'PROPN']
+
 
 class InputExample(object):
-    def __init__(self, guid, context, phrases, labels, golden):
+    def __init__(self, guid, context, token_spans, pos_tag, src_index, tgt_index, phrase_spans):
         self.guid = guid
         self.context = context
-        self.phrases = phrases
-        self.labels = labels
-        self.golden = golden
+        self.token_spans = token_spans
+        self.pos_tag = pos_tag
+        self.src_index = src_index
+        self.tgt_index = tgt_index
+        self.phrase_spans = phrase_spans
 
     def __repr__(self):
         return str(self.to_json_string())
@@ -44,14 +52,18 @@ class InputExample(object):
 
 class InputFeatures(object):
     def __init__(self, guid, input_ids, attention_mask=None, token_type_ids=None,
-                 mappings=None, num_phrases=None, labels=None):
+                 token_mapping=None, pos_tag=None, num_tokens=None,
+                 src_index=None, tgt_index=None, phrase_labels=None):
         self.guid = guid
         self.input_ids = input_ids
         self.attention_mask = attention_mask
         self.token_type_ids = token_type_ids
-        self.mappings = mappings
-        self.num_phrases = num_phrases
-        self.labels = labels
+        self.token_mapping = token_mapping
+        self.pos_tag = pos_tag
+        self.num_tokens = num_tokens
+        self.src_index = src_index
+        self.tgt_index = tgt_index
+        self.phrase_labels = phrase_labels
 
     def __repr__(self):
         return str(self.to_json_string())
@@ -66,7 +78,7 @@ class InputFeatures(object):
         return json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
 
 
-def convert_examples_to_features(examples, tokenizer, max_seq_length):
+def convert_examples_to_features(examples, tokenizer, max_seq_length, max_num_tokens):
     features = []
     for (ex_index, example) in enumerate(tqdm(examples, desc="Converting Examples")):
         encoded = {"guid": example.guid}
@@ -79,18 +91,32 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length):
             return_offsets_mapping=True,
         ))
 
-        mappings = []
-        for _, phrase_start, phrase_end in example.phrases:
-            token_start, token_end = -1, -1
-            for i in range(len(encoded["offset_mapping"]) - 1):
-                if encoded["offset_mapping"][i][0] <= phrase_start < encoded["offset_mapping"][i + 1][0]:
-                    token_start = i
-                if encoded["offset_mapping"][i][1] <= phrase_end <= encoded["offset_mapping"][i + 1][1]:
-                    token_end = i
-            if token_start != -1 and token_end != -1: mappings.append((token_start, token_end))
-        encoded["mappings"] = mappings
-        encoded["num_phrases"] = len(mappings)
-        encoded["labels"] = example.labels
+        # initialize features
+        token_mapping = [max_num_tokens - 1] * max_seq_length
+        for i, (start, end) in enumerate(encoded["offset_mapping"]):
+            for j, (token, token_start, token_end) in enumerate(example.token_spans[:max_num_tokens]):
+                if token_start <= start < end <= token_end:
+                    token_mapping[i] = j
+        encoded["token_mapping"] = token_mapping
+        encoded["pos_tag"] = pad_list(example.pos_tag, 16, max_num_tokens)  # 16 is X
+        encoded["num_tokens"] = min(len(example.token_spans), max_num_tokens)
+
+        # initialize graph
+        edges = []
+        for src, tgt in zip(example.src_index, example.tgt_index):
+            if src >= max_num_tokens or tgt >= max_num_tokens: continue
+            if [src, tgt] in edges or [tgt, src] in edges: continue
+            edges.append([src, tgt])
+            edges.append([tgt, src])
+        encoded["src_index"] = [_[0] for _ in edges]
+        encoded["tgt_index"] = [_[1] for _ in edges]
+
+        # initialize labels
+        phrase_labels = [[0] * max_num_tokens for _ in range(max_num_tokens)]
+        for _, phrase_start, phrase_end in example.phrase_spans:
+            if phrase_start >= max_num_tokens or phrase_end >= max_num_tokens: continue
+            phrase_labels[phrase_start][phrase_end] = 1
+        encoded["phrase_labels"] = coo_matrix(phrase_labels).reshape(1, max_num_tokens * max_num_tokens)
 
         del encoded["offset_mapping"]
         features.append(InputFeatures(**encoded))
@@ -99,11 +125,9 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length):
             logger.info("*** Example ***")
             logger.info("guid: {}".format(encoded["guid"]))
             logger.info("input_ids: {}".format(encoded["input_ids"]))
-            logger.info("phrases: {}".format([
-                tokenizer.decode(encoded["input_ids"][start:end + 1], skip_special_tokens=True)
-                for start, end in encoded["mappings"]
-            ]))
-            logger.info("labels: {}".format(encoded["labels"]))
+            logger.info("token_mapping: {}".format(encoded["token_mapping"]))
+            logger.info("tokens: {}".format([v[0] for v in example.token_spans]))
+            logger.info("phrases: {}".format([v[0] for v in example.phrase_spans]))
 
     return features
 
@@ -114,15 +138,17 @@ class DataProcessor:
             model_type,
             model_name_or_path,
             max_seq_length,
+            max_num_tokens,
             data_dir="",
             overwrite_cache=False
     ):
         self.model_type = model_type
         self.model_name_or_path = model_name_or_path
         self.max_seq_length = max_seq_length
+        self.max_num_tokens = max_num_tokens
 
         self.data_dir = data_dir
-        self.cache_dir = os.path.join(data_dir, "cache")
+        self.cache_dir = os.path.join(data_dir, "cache_gnn_no_semantic")
         self.overwrite_cache = overwrite_cache
 
     def load_and_cache_data(self, role, tokenizer):
@@ -135,11 +161,11 @@ class DataProcessor:
         else:
             examples = []
             for line in tqdm(
-                list(read_json_lines(os.path.join(self.data_dir, "data_{}.json".format(role)))),
+                list(read_json_lines(os.path.join(self.data_dir, "data_{}.feature.json".format(role)))),
                 desc="Loading Examples"
             ):
                 sample = {'guid': len(examples)}
-                sample.update(line)
+                sample.update(_load_line(line))
                 examples.append(InputExample(**sample))
             logger.info("Saving examples into cached file {}".format(cached_examples))
             torch.save(examples, cached_examples)
@@ -156,7 +182,7 @@ class DataProcessor:
             logger.info("Loading features from cached file {}".format(cached_features))
             features = torch.load(cached_features)
         else:
-            features = convert_examples_to_features(examples, tokenizer, self.max_seq_length)
+            features = convert_examples_to_features(examples, tokenizer, self.max_seq_length, self.max_num_tokens)
             logger.info("Saving features into cached file {}".format(cached_features))
             torch.save(features, cached_features)
 
@@ -171,10 +197,43 @@ class DataProcessor:
         else:
             all_token_type_ids = torch.tensor([[0] * self.max_seq_length for _ in features], dtype=torch.long)
 
-        all_num_phrases = torch.tensor([f.num_phrases for f in features], dtype=torch.long)
-        max_num_phrases = int(torch.max(all_num_phrases))
-        all_mappings = torch.tensor([pad_list(f.mappings, [0, 0], max_num_phrases) for f in features], dtype=torch.long)
-        all_labels = torch.tensor([pad_list(f.labels, 0, max_num_phrases) for f in features], dtype=torch.long)
+        all_token_mapping = torch.tensor([f.token_mapping for f in features], dtype=torch.long)
+        all_pos_tag = torch.tensor([f.pos_tag for f in features], dtype=torch.long)
+        all_num_tokens = torch.tensor([f.num_tokens for f in features], dtype=torch.long)
+        all_src_index = torch.tensor(pad_batch([f.src_index for f in features], 0), dtype=torch.long)
+        all_tgt_index = torch.tensor(pad_batch([f.tgt_index for f in features], 0), dtype=torch.long)
 
-        dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_mappings, all_num_phrases, all_labels)
+        all_phrase_labels = vstack([f.phrase_labels for f in features])
+        all_phrase_labels = torch.sparse_coo_tensor(
+            torch.tensor(np.vstack([all_phrase_labels.row, all_phrase_labels.col]), dtype=torch.long),
+            torch.tensor(all_phrase_labels.data, dtype=torch.long),
+            size=all_phrase_labels.shape,
+            dtype=torch.long,
+        )
+
+        dataset = TensorDataset(
+            all_input_ids, all_attention_mask, all_token_type_ids,
+            all_token_mapping, all_pos_tag, all_num_tokens, all_src_index, all_tgt_index, all_phrase_labels,
+        )
+
         return dataset
+
+
+def _load_line(line):
+    token_spans = []
+    for v in line['token_spans']: token_spans.extend(v)
+    pos_tag = []
+    for v in line['pos_tag']: pos_tag.extend(v)
+    src_index = []
+    for v in line['src_index']: src_index.extend(v)
+    tgt_index = []
+    for v in line['tgt_index']: tgt_index.extend(v)
+
+    return {
+        'context': line['context'],
+        'token_spans': token_spans,
+        'pos_tag': pos_tag,
+        'src_index': src_index,
+        'tgt_index': tgt_index,
+        'phrase_spans': line['phrase_spans'],
+    }

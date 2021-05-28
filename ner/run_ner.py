@@ -82,7 +82,9 @@ class DataTrainingArguments:
             "than this will be truncated, sequences shorter will be padded."
         },
     )
-    log_file: str = field(default=None, metadata={"help": "The log file."})
+    log_dir: str = field(
+        default=None, metadata={"help": "The log directory where the running details will be written."}
+    )
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
     )
@@ -101,6 +103,16 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
+    # Setup output dir
+    if training_args.do_train:
+        training_args.output_dir = os.path.join(
+            training_args.output_dir,
+            "{}_{}_{:.1e}".format(
+                list(filter(None, model_args.model_name_or_path.split("/"))).pop(),
+                data_args.max_seq_length,
+                training_args.learning_rate,
+            ),
+        )
     if (
         os.path.exists(training_args.output_dir)
         and os.listdir(training_args.output_dir)
@@ -122,6 +134,18 @@ def main():
         )
 
     # Setup logging
+    if data_args.log_dir is not None:
+        os.makedirs(data_args.log_dir, exist_ok=True)
+        data_args.log_file = os.path.join(
+            data_args.log_dir,
+            "{}_{}_{:.1e}.txt".format(
+                list(filter(None, model_args.model_name_or_path.split("/"))).pop(),
+                data_args.max_seq_length,
+                training_args.learning_rate,
+            ),
+        )
+    else:
+        data_args.log_file = None
     init_logger(logging.INFO if training_args.local_rank in [-1, 0] else logging.WARN, data_args.log_file)
     logger.warning(
         "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
