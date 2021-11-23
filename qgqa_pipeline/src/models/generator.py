@@ -16,7 +16,7 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 class Generator:
     """
-    Examples:
+    Example:
         import json
         import torch
 
@@ -36,11 +36,11 @@ class Generator:
         print(json.dumps(results, ensure_ascii=False, indent=4))
     """
 
-    def __init__(self, model_name_or_path, cache_dir=None, device='cpu'):
+    def __init__(self, model_name_or_path, do_lower_case=False, cache_dir=None, device='cpu'):
         self.model_name_or_path = model_name_or_path
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name_or_path,
-            do_lower_case='uncased' in model_name_or_path,
+            do_lower_case=do_lower_case,
             cache_dir=cache_dir if cache_dir else None,
         )
         self.model = AutoModelForSeq2SeqLM.from_pretrained(
@@ -51,6 +51,17 @@ class Generator:
         self.model.eval()
 
     def convert_dataset(self, input_data, max_seq_length):
+        """
+        Convert inputs into dataset based on https://github.com/patil-suraj/question_generation
+
+        Args:
+            input_data:
+            max_seq_length:
+
+        Returns:
+
+        """
+
         encoded_data = []
         for entry in tqdm(input_data, desc='Converting dataset'):
             context = entry['context']

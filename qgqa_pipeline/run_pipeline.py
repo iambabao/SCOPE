@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--generator_model", required=True, type=str, help="The path to the generator model")
+    parser.add_argument("--reader_model", required=True, type=str, help="The path to the reader model")
     parser.add_argument("--input_file", required=True, type=str, help="The input file")
     parser.add_argument("--output_file", required=True, type=str, help="The output file")
     parser.add_argument(
@@ -47,8 +49,8 @@ def main():
 
     logger.info('Initializing pipeline')
     pipeline = Pipeline(
-        generator_model_name='valhalla/t5-base-qg-hl',
-        reader_model_name='deepset/roberta-large-squad2',
+        generator_model=args.generator_model,
+        reader_model=args.reader_model,
         cache_dir=args.cache_dir,
         device='cuda' if torch.cuda.is_available() and not args.no_cuda else 'cpu',
     )

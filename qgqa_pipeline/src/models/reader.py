@@ -16,7 +16,7 @@ from transformers import AutoTokenizer, AutoModelForQuestionAnswering
 
 class Reader:
     """
-    Examples:
+    Example:
         import json
 
         input_data = [
@@ -43,11 +43,11 @@ class Reader:
         print(json.dumps(results, ensure_ascii=False, indent=4))
     """
 
-    def __init__(self, model_name_or_path, cache_dir=None, device='cpu'):
+    def __init__(self, model_name_or_path, do_lower_case=False, cache_dir=None, device='cpu'):
         self.model_name_or_path = model_name_or_path
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name_or_path,
-            do_lower_case='uncased' in model_name_or_path,
+            do_lower_case=do_lower_case,
             use_fast=True,
             cache_dir=cache_dir if cache_dir else None,
         )
@@ -118,7 +118,7 @@ class Reader:
                 end_scores = torch.softmax(end_scores / temperature, dim=-1).detach().cpu().tolist()
 
                 for s_score, e_score, (start, end) in zip(start_scores, end_scores, batch[-1]):
-                    all_scores.append((s_score[start] * e_score[end]) ** 0.5)
+                    all_scores.append((s_score[start], e_score[end]))
 
         num_questions = len(input_data[0]['questions'])
         for i in range(len(input_data)):

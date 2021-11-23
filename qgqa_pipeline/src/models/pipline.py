@@ -14,7 +14,7 @@ from .reader import Reader
 
 class Pipeline:
     """
-    Examples:
+    Example:
         import json
         import torch
 
@@ -25,8 +25,8 @@ class Pipeline:
             {'context': 'Sarah lived in London. Jone lived in Canada.', 'answer': ('lived', 28, 33)},
         ]
         pipeline = Pipeline(
-            generator_model_name='valhalla/t5-base-qg-hl',
-            reader_model_name='deepset/roberta-large-squad2',
+            generator_model='valhalla/t5-base-qg-hl',
+            reader_model='deepset/roberta-large-squad2',
             cache_dir='your_cache_dir',
             device='cuda' if torch.cuda.is_available() else 'cpu',
         )
@@ -35,9 +35,9 @@ class Pipeline:
         print(json.dumps(results, ensure_ascii=False, indent=4))
     """
 
-    def __init__(self, generator_model_name, reader_model_name, cache_dir=None, device='cpu'):
-        self.generator = Generator(generator_model_name, cache_dir=cache_dir, device=device)
-        self.reader = Reader(reader_model_name, cache_dir=cache_dir, device=device)
+    def __init__(self, generator_model, reader_model, do_lower_case=False, cache_dir=None, device='cpu'):
+        self.generator = Generator(generator_model, do_lower_case=do_lower_case, cache_dir=cache_dir, device=device)
+        self.reader = Reader(reader_model, do_lower_case=do_lower_case, cache_dir=cache_dir, device=device)
 
     def __call__(self, input_data, max_seq_length=None, batch_size=8, beam_size=1, temperature=1.0):
         results = self.generator(input_data, max_seq_length=max_seq_length, batch_size=batch_size, beam_size=beam_size)
