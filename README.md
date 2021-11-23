@@ -63,7 +63,7 @@ CUDA_VISIBLE_DEVICES=0 python train_extractor.py \
 ```
 
 ### Running with different models
-Use `MODEL_TYPE` and `MODEL_NAME_OR_PATH` to control the backbone and weather to ues GNN.
+Use `MODEL_TYPE` and `MODEL_NAME_OR_PATH` to control the backbone and whether to ues GNN.
 Candidate model list is provided in `do_train.sh`.
 
 ### Running with different loss types
