@@ -1,6 +1,16 @@
 # Harvesting More Answer Spans from Paragraph beyond Annotation
 
-Source code for [Harvesting More Answer Spans from Paragraph beyond Annotation]()
+Source code for [Harvesting More Answer Spans from Paragraph beyond Annotation](https://dl.acm.org/doi/abs/10.1145/3488560.3498399)
+
+```
+@inproceedings{bao2022harvesting,  
+  title={Harvesting More Answer Spans from Paragraph beyond Annotation},  
+  author={Bao, Qiaoben and Chen, Jiangjie and Liu, Linfang and Liu, Jingping and Liang, Jiaqing and Xiao, Yanghua},  
+  booktitle={Proceedings of the Fifteenth ACM International Conference on Web Search and Data Mining},  
+  pages={27--36},  
+  year={2022}  
+}
+```
 
 ## Requirements
 
